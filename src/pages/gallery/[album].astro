@@ -6,7 +6,10 @@ import { galleryConfig, siteConfig } from "@/config";
 import I18nKey from "@/i18n/i18nKey";
 import { i18n } from "@/i18n/translation";
 import MainGridLayout from "@/layouts/MainGridLayout.astro";
-import { getAlbumCover, scanAlbumPhotos } from "@/utils/gallery-utils";
+import {
+	getGalleryAlbumDetail,
+	getGalleryAlbums,
+} from "@/utils/gallery-utils";
 import { getLqipProps } from "@/utils/lqip-utils";
 import { url } from "@/utils/url-utils";
 
@@ -15,21 +18,22 @@ if (!siteConfig.pages.gallery) {
 	return Astro.redirect("/404/");
 }
 
-export function getStaticPaths() {
-	return galleryConfig.albums.map((album) => ({
+export async function getStaticPaths() {
+	const albums = await getGalleryAlbums();
+	return albums.map((album) => ({
 		params: { album: album.id },
 	}));
 }
 
 const { album: albumId } = Astro.params;
-const albumMeta = galleryConfig.albums.find((a) => a.id === albumId);
+const albumMeta = await getGalleryAlbumDetail(albumId);
 
 if (!albumMeta) {
 	return Astro.redirect("/404/");
 }
 
-const photos = scanAlbumPhotos(albumMeta.id);
-const cover = getAlbumCover(albumMeta, photos);
+const photos = albumMeta.photos;
+const cover = albumMeta.cover;
 const columnWidth = galleryConfig.columnWidth || 240;
 
 // LQIP 渐变占位

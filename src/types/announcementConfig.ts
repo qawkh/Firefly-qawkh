@@ -11,4 +11,8 @@ export type AnnouncementConfig = {
 		url: string; // 链接地址
 		external?: boolean; // 是否外部链接
 	};
+	api?: {
+		enable?: boolean; // 是否从 qawkh 后台加载公告
+		endpoint?: string; // 公告接口地址
+	};
 };

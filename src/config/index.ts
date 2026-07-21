@@ -23,11 +23,13 @@ export type {
 	SakuraConfig,
 	SidebarLayoutConfig,
 	SiteConfig,
+	SpecialDatesWidgetConfig,
 	SponsorConfig,
 	SponsorItem,
 	SponsorMethod,
 	WidgetComponentConfig,
 	WidgetComponentType,
+	WeatherWidgetConfig,
 	WidgetSpecificConfig,
 } from "../types/config";
 export type {

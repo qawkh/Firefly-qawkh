@@ -11,6 +11,29 @@
     font-family: var(--font-banner-title, inherit);
 }
 
+.banner-home-text-overlay .banner-eyebrow {
+    font-family: var(--font-banner-subtitle, Inter, ui-sans-serif, system-ui, sans-serif);
+    font-size: clamp(0.75rem, 1.6vw, 1.15rem);
+    line-height: 1.2;
+    text-shadow: 0 2px 16px rgba(0, 0, 0, 0.65);
+}
+
+.banner-home-text-overlay .banner-title {
+    font-family: Georgia, "Times New Roman", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", serif;
+    font-size: clamp(3.75rem, 10vw, var(--banner-title-size, 8rem));
+    line-height: 0.92;
+    letter-spacing: 0;
+    text-shadow: 0 8px 32px rgba(0, 0, 0, 0.62);
+}
+
+.banner-home-text-overlay .banner-subtitle {
+    font-family: var(--font-banner-subtitle, Inter, ui-sans-serif, system-ui, sans-serif);
+    font-size: clamp(1rem, 2vw, 1.45rem) !important;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-shadow: 0 3px 18px rgba(0, 0, 0, 0.68);
+}
+
 .banner-subtitle {
     text-shadow: 0 2px 16px rgba(0, 0, 0, 0.6);
     /* 独立字体设置，通过 fontConfig.bannerSubtitleFont 配置 */

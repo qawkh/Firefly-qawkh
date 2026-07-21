@@ -7,6 +7,15 @@ import type { WidgetComponentConfig } from "@/types/config";
 import { getCategoryList } from "@/utils/content-utils";
 
 const categories = await getCategoryList();
+const articlesEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ARTICLES_ENDPOINT || "/api/user/articles";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeArticlesUrl = /^https?:\/\//i.test(articlesEndpoint)
+	? articlesEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${articlesEndpoint.replace(/^\/+/, "")}`
+		: articlesEndpoint;
+const uncategorizedText = i18n(I18nKey.uncategorized);
 
 const COLLAPSED_HEIGHT = "7.5rem";
 
@@ -27,6 +36,7 @@ const isCollapsed = collapseThreshold
 <WidgetLayout name={i18n(I18nKey.categories)} showTitle={showTitle} id="categories" isCollapsed={isCollapsed} collapsedHeight={COLLAPSED_HEIGHT}
                 class={className} style={style}
 >
+  <div data-runtime-widget-categories data-runtime-articles-url={runtimeArticlesUrl} data-uncategorized-label={uncategorizedText}>
     {categories.map((c) =>
         <ButtonLink
             url={c.url}
@@ -36,4 +46,84 @@ const isCollapsed = collapseThreshold
             {c.name.trim()}
         </ButtonLink>
     )}
+  </div>
 </WidgetLayout>
+
+<script is:inline>
+  (function initRuntimeWidgetCategories() {
+    function normalizeText(value) {
+      return typeof value === "string" ? value.trim() : "";
+    }
+
+    function escapeHtml(value) {
+      return normalizeText(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function getEndpoints(endpoint) {
+      if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+      const hostname = window.location.hostname;
+      if (hostname === "localhost" || hostname === "127.0.0.1") {
+        const localBackendEndpoint = "http://localhost:8090/api/user/articles";
+        return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+      }
+      return [endpoint];
+    }
+
+    async function fetchArticles(endpoint) {
+      for (const item of getEndpoints(endpoint)) {
+        try {
+          const response = await fetch(item, {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          });
+          if (!response.ok) continue;
+          const payload = await response.json();
+          if (payload?.code === 200 && Array.isArray(payload.data)) return payload.data;
+        } catch (error) {
+          console.warn("侧栏分类运行时文章加载失败。", error);
+        }
+      }
+      return null;
+    }
+
+    function getCategoryUrl(category, uncategorized) {
+      return category === uncategorized
+        ? "/archive/?uncategorized=true"
+        : `/archive/?category=${encodeURIComponent(category)}`;
+    }
+
+    function renderCategory(category, uncategorized) {
+      return `<a href="${getCategoryUrl(category.name, uncategorized)}" aria-label="View all posts in the ${escapeHtml(category.name)} category"><button class="w-full h-10 rounded-lg bg-none hover:bg-(--btn-plain-bg-hover) active:bg-(--btn-plain-bg-active) transition-all pl-2 hover:pl-3 text-neutral-700 hover:text-(--primary) dark:text-neutral-300 dark:hover:text-(--primary)"><div class="flex items-center justify-between relative mr-2"><div class="overflow-hidden text-left whitespace-nowrap text-ellipsis">${escapeHtml(category.name)}</div><div class="transition px-2 h-7 ml-4 min-w-8 rounded-lg text-sm font-bold text-(--btn-content) dark:text-(--deep-text) bg-[oklch(0.95_0.025_var(--hue))] dark:bg-(--primary) flex items-center justify-center">${category.count}</div></div></button></a>`;
+    }
+
+    async function refreshCategories() {
+      document.querySelectorAll("[data-runtime-widget-categories]").forEach(async (container) => {
+        const endpoint = container.getAttribute("data-runtime-articles-url") || "/api/user/articles";
+        const uncategorized = container.getAttribute("data-uncategorized-label") || "Uncategorized";
+        const articles = await fetchArticles(endpoint);
+        if (!articles) return;
+        const countMap = new Map();
+        for (const article of articles) {
+          const category = normalizeText(article?.categoryName) || uncategorized;
+          countMap.set(category, (countMap.get(category) || 0) + 1);
+        }
+        const categories = Array.from(countMap.entries())
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+        if (categories.length > 0) container.innerHTML = categories.map((category) => renderCategory(category, uncategorized)).join("");
+      });
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", refreshCategories, { once: true });
+    } else {
+      refreshCategories();
+    }
+    document.addEventListener("astro:page-load", refreshCategories);
+  })();
+</script>

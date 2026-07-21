@@ -1,33 +1,135 @@
 ---
 import { commentConfig } from "@/config";
+import type { CommentConfig } from "@/types/commentConfig";
 
 interface Props {
 	path: string;
+	walineConfig?: CommentConfig["waline"];
+	remoteSettingsEnabled?: boolean;
+	settingsEndpoint?: string;
+	fallbackEnabled?: boolean;
 }
 
+const {
+	path,
+	walineConfig: providedWalineConfig,
+	remoteSettingsEnabled = false,
+	settingsEndpoint = "/api/user/guestbook-settings",
+	fallbackEnabled = true,
+} = Astro.props;
+const walineConfig = providedWalineConfig ?? commentConfig.waline;
+
 const config = {
-	...commentConfig.waline,
+	...walineConfig,
 	el: "#waline",
-	path: Astro.props.path,
+	path,
 	dark: "html.dark",
 	wordLimit: ["2", "300"],
-	...(commentConfig.waline?.visitorCount ? { pageview: true } : {}),
+	...(walineConfig?.visitorCount ? { pageview: true } : {}),
 };
 ---
 <!-- Waline -->
 <div class="relative w-full">
   <div id="waline"></div>
   <link rel="stylesheet" href="https://unpkg.com/@waline/client@v3/dist/waline.css" />
-  <script type="module" is:inline define:vars={{ config }}>
-    import { init } from 'https://unpkg.com/@waline/client@v3/dist/waline.js';
-    const requestedPath = new URLSearchParams(window.location.search).get("path");
-    const effectiveConfig = requestedPath
-      ? { ...config, path: requestedPath }
-      : config;
-    try {
-      init(effectiveConfig);
-    } catch (error) {
-      console.error("[Waline] Failed to initialize:", error);
-    }
+  <script type="module" is:inline define:vars={{ config, remoteSettingsEnabled, settingsEndpoint, fallbackEnabled }}>
+    (async function initWaline() {
+      const walineRoot = document.getElementById("waline");
+      const commentRoot = walineRoot?.closest("[data-comment-root]");
+
+      function normalizeText(value) {
+        return typeof value === "string" ? value.trim() : "";
+      }
+
+      function normalizeLoginMode(value) {
+        return value === "force" || value === "disable" ? value : "enable";
+      }
+
+      function setCommentVisible(visible) {
+        if (!commentRoot) return;
+        commentRoot.hidden = !visible;
+        commentRoot.classList.toggle("hidden", !visible);
+        document.querySelectorAll("[data-waline-pageview-root]").forEach((element) => {
+          element.hidden = !visible;
+          element.classList.toggle("hidden", !visible);
+        });
+      }
+
+      function getSettingsEndpoints(endpoint) {
+        if (!endpoint) return [];
+        if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+        const hostname = window.location.hostname;
+        if (hostname === "localhost" || hostname === "127.0.0.1") {
+          const localBackendEndpoint = "http://localhost:8090/api/user/guestbook-settings";
+          return localBackendEndpoint === endpoint
+            ? [endpoint]
+            : [localBackendEndpoint, endpoint];
+        }
+        return [endpoint];
+      }
+
+      async function fetchRemoteSettings() {
+        if (!remoteSettingsEnabled) return { state: "skipped" };
+        const endpoints = getSettingsEndpoints(settingsEndpoint);
+        for (const endpoint of endpoints) {
+          try {
+            const response = await fetch(endpoint, {
+              headers: { Accept: "application/json" },
+              cache: "no-store",
+            });
+            if (!response.ok) continue;
+
+            const payload = await response.json();
+            if (!payload || payload.code !== 200 || !payload.data) continue;
+
+            const serverURL = normalizeText(payload.data.serverUrl);
+            if (!serverURL) return { state: "empty" };
+            return {
+              state: "configured",
+              config: {
+                serverURL,
+                login: normalizeLoginMode(payload.data.loginMode),
+              },
+            };
+          } catch (error) {
+            console.warn("[Waline] Failed to load qawkh comment settings:", error);
+          }
+        }
+        return { state: "failed" };
+      }
+
+      const remoteSettings = await fetchRemoteSettings();
+      if (remoteSettings.state === "empty") {
+        setCommentVisible(false);
+        return;
+      }
+
+      if (remoteSettings.state !== "configured" && !fallbackEnabled) {
+        setCommentVisible(false);
+        return;
+      }
+
+      const requestedPath = new URLSearchParams(window.location.search).get("path");
+      const effectiveConfig = {
+        ...config,
+        ...(remoteSettings.state === "configured" ? remoteSettings.config : {}),
+        ...(requestedPath ? { path: requestedPath } : {}),
+      };
+
+      effectiveConfig.serverURL = normalizeText(effectiveConfig.serverURL);
+      if (!effectiveConfig.serverURL) {
+        setCommentVisible(false);
+        return;
+      }
+
+      setCommentVisible(true);
+
+      try {
+        const { init } = await import("https://unpkg.com/@waline/client@v3/dist/waline.js");
+        init(effectiveConfig);
+      } catch (error) {
+        console.error("[Waline] Failed to initialize:", error);
+      }
+    })();
   </script>
 </div>

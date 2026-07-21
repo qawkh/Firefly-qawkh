@@ -1,0 +1,321 @@
+---
+import { Icon } from "astro-icon/components";
+import WidgetLayout from "@/components/common/WidgetLayout.astro";
+import type { WidgetComponentConfig } from "@/types/config";
+
+interface Props {
+	class?: string;
+	style?: string;
+	widgetConfig?: WidgetComponentConfig;
+}
+
+const { class: className, style, widgetConfig } = Astro.props;
+const showTitle = widgetConfig?.showTitle !== false;
+const configuredLimit = widgetConfig?.specificConfig?.specialDates?.limit ?? 3;
+const limit = Math.min(3, Math.max(1, Math.floor(configuredLimit)));
+const specialDatesEndpoint =
+	widgetConfig?.specificConfig?.specialDates?.endpoint ||
+	import.meta.env.PUBLIC_QAWKH_SPECIAL_DATES_ENDPOINT ||
+	"/api/user/special-dates";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeSpecialDatesUrl = /^https?:\/\//i.test(specialDatesEndpoint)
+	? specialDatesEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${specialDatesEndpoint.replace(/^\/+/, "")}`
+		: specialDatesEndpoint;
+---
+
+<WidgetLayout name="近期日期" showTitle={showTitle} id="special-dates-widget" class={className} style={style}>
+	<div
+		data-special-dates-widget
+		data-special-dates-endpoint={runtimeSpecialDatesUrl}
+		data-special-dates-limit={limit}
+		class="special-dates-widget min-h-24"
+	>
+		<div data-special-dates-loading class="flex flex-col gap-2">
+			<div class="h-16 animate-pulse rounded-lg bg-neutral-100/70 dark:bg-neutral-800/50"></div>
+			<div class="h-16 animate-pulse rounded-lg bg-neutral-100/70 dark:bg-neutral-800/50"></div>
+		</div>
+
+		<div data-special-dates-error class="hidden rounded-lg bg-neutral-100/60 p-3 text-sm text-neutral-500 dark:bg-neutral-800/50 dark:text-neutral-400">
+			<div class="flex items-center gap-2 text-(--primary)">
+				<Icon is:inline name="material-symbols:event-busy-outline-rounded" class="text-xl" aria-hidden="true" />
+				<span class="font-bold">近期日期暂不可用</span>
+			</div>
+		</div>
+
+		<div data-special-dates-empty class="hidden rounded-lg bg-neutral-100/60 p-3 text-center text-sm text-neutral-500 dark:bg-neutral-800/50 dark:text-neutral-400">
+			暂无近期日期
+		</div>
+
+		<div data-special-dates-list class="hidden flex-col gap-1.5"></div>
+	</div>
+</WidgetLayout>
+
+<script>
+	import { Solar } from "lunar-javascript";
+
+	type SpecialDateDto = {
+		id?: number | string;
+		title?: string;
+		description?: string | null;
+		specialDate?: string;
+		repeatAnnually?: number | string | null;
+		sortOrder?: number | string | null;
+	};
+
+	type CalendarEvent = {
+		id: number | string;
+		title: string;
+		subtitle: string;
+		nextDate: Date;
+		distance: number;
+		repeatAnnually: boolean;
+		source: "builtin" | "custom";
+		displayDate: string;
+		sortOrder: number;
+	};
+
+	type RenderState = "list" | "empty" | "error";
+
+	(function initSpecialDatesWidget() {
+		const runtimeWindow = window;
+		if (runtimeWindow.__fireflySpecialDatesWidgetBound) {
+			if (typeof runtimeWindow.__fireflyLoadSpecialDatesWidgets === "function") runtimeWindow.__fireflyLoadSpecialDatesWidgets();
+			return;
+		}
+		runtimeWindow.__fireflySpecialDatesWidgetBound = true;
+
+		const defaultEndpoint = "/api/user/special-dates";
+		const maxLookaheadDays = 400;
+
+		function normalizeText(value: unknown): string {
+			return typeof value === "string" ? value.trim() : "";
+		}
+
+		function escapeHtml(value: unknown): string {
+			return normalizeText(value)
+				.replace(/&/g, "&amp;")
+				.replace(/</g, "&lt;")
+				.replace(/>/g, "&gt;")
+				.replace(/"/g, "&quot;")
+				.replace(/'/g, "&#39;");
+		}
+
+		function getEndpoints(endpoint: string): string[] {
+			if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+			const hostname = window.location.hostname;
+			if (hostname === "localhost" || hostname === "127.0.0.1") {
+				const localBackendEndpoint = "http://localhost:8090/api/user/special-dates";
+				return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+			}
+			return [endpoint];
+		}
+
+		function dedupeTexts(values: unknown[]): string[] {
+			const seen = new Set();
+			return values
+				.map(normalizeText)
+				.filter((value) => {
+					if (!value || seen.has(value)) return false;
+					seen.add(value);
+					return true;
+				});
+		}
+
+		function parseDateOnly(value: unknown): Date | null {
+			const text = normalizeText(value);
+			const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+			if (!match) return null;
+			const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+			return Number.isNaN(date.getTime()) ? null : date;
+		}
+
+		function dateKey(date: Date): string {
+			return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+		}
+
+		function dateLabel(date: Date, repeatAnnually: boolean): string {
+			const monthDay = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+			return repeatAnnually ? `每年 ${monthDay}` : dateKey(date);
+		}
+
+		function displayDateLabel(date: Date): string {
+			return `${String(date.getMonth() + 1).padStart(2, "0")}月${String(date.getDate()).padStart(2, "0")}日`;
+		}
+
+		function daysBetween(start: Date, end: Date): number {
+			const startUtc = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+			const endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+			return Math.round((endUtc - startUtc) / 86400000);
+		}
+
+		function distanceLabel(days: number): string {
+			if (days === 0) return "今天";
+			if (days === 1) return "明天";
+			return `${days}天后`;
+		}
+
+		function nextCustomOccurrence(item: SpecialDateDto, today: Date): CalendarEvent | null {
+			const sourceDate = parseDateOnly(item?.specialDate);
+			if (!sourceDate) return null;
+			const repeatAnnually = Number(item?.repeatAnnually) === 1;
+			let nextDate = sourceDate;
+			if (repeatAnnually) {
+				nextDate = new Date(today.getFullYear(), sourceDate.getMonth(), sourceDate.getDate());
+				if (nextDate < today) nextDate = new Date(today.getFullYear() + 1, sourceDate.getMonth(), sourceDate.getDate());
+			}
+			const distance = daysBetween(today, nextDate);
+			if (distance < 0) return null;
+			const title = normalizeText(item?.title) || "特殊日期";
+			return {
+				id: item.id ?? `custom-${dateKey(nextDate)}-${title}`,
+				title,
+				subtitle: normalizeText(item?.description),
+				nextDate,
+				distance,
+				repeatAnnually,
+				source: "custom",
+				displayDate: dateLabel(nextDate, repeatAnnually),
+				sortOrder: Number(item?.sortOrder) || 0,
+			};
+		}
+
+		function collectBuiltinFestivalNames(date: Date): string[] {
+			const solar = Solar.fromYmd(date.getFullYear(), date.getMonth() + 1, date.getDate());
+			const lunar = solar.getLunar();
+			const solarOtherFestivals = typeof solar.getOtherFestivals === "function" ? solar.getOtherFestivals() : [];
+			const lunarOtherFestivals = typeof lunar.getOtherFestivals === "function" ? lunar.getOtherFestivals() : [];
+
+			return dedupeTexts([
+				...solar.getFestivals(),
+				...solarOtherFestivals,
+				...lunar.getFestivals(),
+				...lunarOtherFestivals,
+				lunar.getJieQi(),
+			]);
+		}
+
+		function buildBuiltinUpcomingEvents(today: Date): CalendarEvent[] {
+			const events: CalendarEvent[] = [];
+			for (let offset = 0; offset <= maxLookaheadDays; offset += 1) {
+				const nextDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset);
+				const festivalNames = collectBuiltinFestivalNames(nextDate);
+				if (!festivalNames.length) continue;
+
+				events.push({
+					id: `builtin-${dateKey(nextDate)}`,
+					title: festivalNames.join(" · "),
+					subtitle: "系统节日 / 节气",
+					nextDate,
+					distance: daysBetween(today, nextDate),
+					repeatAnnually: true,
+					source: "builtin",
+					displayDate: displayDateLabel(nextDate),
+					sortOrder: 9999,
+				});
+			}
+			return events;
+		}
+
+		async function fetchSpecialDates(endpoint: string): Promise<SpecialDateDto[]> {
+			for (const candidateEndpoint of getEndpoints(endpoint)) {
+				try {
+					const response = await fetch(candidateEndpoint, {
+						headers: { Accept: "application/json" },
+						cache: "no-store",
+					});
+					if (!response.ok) continue;
+					const payload = await response.json() as { code?: number; data?: unknown };
+					if (payload?.code === 200 && Array.isArray(payload.data)) return payload.data as SpecialDateDto[];
+				} catch (_) {}
+			}
+			return [];
+		}
+
+		function sourcePriority(item: CalendarEvent): number {
+			return item.source === "custom" ? 0 : 1;
+		}
+
+		function compareEvents(a: CalendarEvent, b: CalendarEvent): number {
+			return a.distance - b.distance || sourcePriority(a) - sourcePriority(b) || (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0) || normalizeText(a.title).localeCompare(normalizeText(b.title), "zh-CN");
+		}
+
+		function dedupeEvents(items: CalendarEvent[]): CalendarEvent[] {
+			const seen = new Set();
+			return items.filter((item) => {
+				const identity = `${dateKey(item.nextDate)}-${normalizeText(item.title)}`;
+				if (seen.has(identity)) return false;
+				seen.add(identity);
+				return true;
+			});
+		}
+
+		function resolveLimit(root: HTMLElement): number {
+			const configuredLimit = Number(root.dataset.specialDatesLimit);
+			return Math.min(3, Math.max(1, Math.floor(Number.isFinite(configuredLimit) ? configuredLimit : 3)));
+		}
+
+		function getUpcomingDates(items: SpecialDateDto[], itemLimit: number): CalendarEvent[] {
+			const today = new Date();
+			today.setHours(0, 0, 0, 0);
+			const customEvents = items
+				.map((item) => nextCustomOccurrence(item, today))
+				.filter((item): item is CalendarEvent => Boolean(item));
+			const builtinEvents = buildBuiltinUpcomingEvents(today);
+			return dedupeEvents([...customEvents, ...builtinEvents].sort(compareEvents)).slice(0, itemLimit);
+		}
+
+		function setVisible(root: Element, selector: string, visible: boolean, flex = false): void {
+			const node = root.querySelector(selector);
+			if (!node) return;
+			node.classList.toggle("hidden", !visible);
+			if (flex) node.classList.toggle("flex", visible);
+		}
+
+		function renderList(root: Element, items: CalendarEvent[]): void {
+			const container = root.querySelector("[data-special-dates-list]");
+			if (!container) return;
+			container.innerHTML = items
+				.map((item) => {
+					const title = escapeHtml(item.title) || "特殊日期";
+					const subtitle = escapeHtml(item.subtitle);
+					const displayDate = escapeHtml(item.displayDate || dateLabel(item.nextDate, item.repeatAnnually));
+					return `<div class="group flex min-w-0 items-center gap-3 rounded-lg p-2 text-neutral-700/75 transition-colors duration-150 hover:bg-(--btn-plain-bg-hover) hover:text-(--primary) dark:text-neutral-300/75"><div class="flex size-11 shrink-0 flex-col items-center justify-center rounded-lg bg-(--btn-regular-bg) text-(--primary)"><span class="text-xs font-bold leading-none">${escapeHtml(String(item.nextDate.getMonth() + 1).padStart(2, "0"))}</span><span class="mt-1 text-base font-black leading-none">${escapeHtml(String(item.nextDate.getDate()).padStart(2, "0"))}</span></div><div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-2"><div class="truncate text-sm font-bold text-neutral-900 dark:text-neutral-100">${title}</div><div class="shrink-0 rounded-md bg-(--btn-regular-bg) px-2 py-0.5 text-[0.7rem] font-bold text-(--primary)">${escapeHtml(distanceLabel(item.distance))}</div></div><div class="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400"><span class="shrink-0">${displayDate}</span>${subtitle ? `<span class="truncate">${subtitle}</span>` : ""}</div></div></div>`;
+				})
+				.join("");
+		}
+
+		function renderState(root: Element, state: RenderState, items: CalendarEvent[]): void {
+			setVisible(root, "[data-special-dates-loading]", false);
+			setVisible(root, "[data-special-dates-error]", state === "error");
+			setVisible(root, "[data-special-dates-empty]", state === "empty");
+			setVisible(root, "[data-special-dates-list]", state === "list", true);
+			if (state === "list") renderList(root, items);
+		}
+
+		async function loadSpecialDatesWidgets() {
+			const widgets = Array.from(document.querySelectorAll<HTMLElement>("[data-special-dates-widget]"));
+			if (!widgets.length) return;
+			await Promise.all(widgets.map(async (root) => {
+				try {
+					const endpoint = root.dataset.specialDatesEndpoint || defaultEndpoint;
+					const data = await fetchSpecialDates(endpoint);
+					const upcoming = getUpcomingDates(data, resolveLimit(root));
+					renderState(root, upcoming.length ? "list" : "empty", upcoming);
+				} catch (_) {
+					renderState(root, "error", []);
+				}
+			}));
+		}
+
+		runtimeWindow.__fireflyLoadSpecialDatesWidgets = loadSpecialDatesWidgets;
+		if (document.readyState === "loading") {
+			document.addEventListener("DOMContentLoaded", loadSpecialDatesWidgets, { once: true });
+		} else {
+			loadSpecialDatesWidgets();
+		}
+		document.addEventListener("astro:page-load", loadSpecialDatesWidgets);
+		document.addEventListener("swup:contentReplaced", loadSpecialDatesWidgets);
+	})();
+</script>

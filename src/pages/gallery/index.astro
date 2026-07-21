@@ -1,11 +1,12 @@
 ---
 import { Icon } from "astro-icon/components";
 import AlbumCard from "@/components/pages/gallery/AlbumCard.astro";
-import { galleryConfig, siteConfig } from "@/config";
+import { siteConfig } from "@/config";
 import I18nKey from "@/i18n/i18nKey";
 import { i18n } from "@/i18n/translation";
 import MainGridLayout from "@/layouts/MainGridLayout.astro";
-import { getAlbumCover, scanAlbumPhotos } from "@/utils/gallery-utils";
+import { getGalleryAlbums } from "@/utils/gallery-utils";
+import { url } from "@/utils/url-utils";
 
 // 检查页面是否启用
 if (!siteConfig.pages.gallery) {
@@ -15,15 +16,21 @@ if (!siteConfig.pages.gallery) {
 const title = i18n(I18nKey.gallery);
 const description = i18n(I18nKey.galleryDescription);
 
-// 构建相册数据（扫描照片、获取封面）
-const albums = galleryConfig.albums.map((album) => {
-	const photos = scanAlbumPhotos(album.id);
-	const cover = getAlbumCover(album, photos);
-	return { ...album, cover, photoCount: photos.length };
-});
+// 构建相册数据：优先使用 qawkh 照片墙，接口不可用时回退本地相册。
+const albums = await getGalleryAlbums();
 
 // 收集所有标签用于筛选
 const allTags = [...new Set(albums.flatMap((a) => a.tags || []))].sort();
+const photoWallEndpoint =
+	import.meta.env.PUBLIC_QAWKH_PHOTO_WALL_ENDPOINT ||
+	"/api/user/photo-wall-categories";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const browserPhotoWallEndpoint = /^https?:\/\//i.test(photoWallEndpoint)
+	? photoWallEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${photoWallEndpoint.replace(/^\/+/, "")}`
+		: photoWallEndpoint;
+const runtimePhotoWallDetailUrl = url("/gallery/photo-wall/");
 ---
 
 <MainGridLayout title={title} description={description}>
@@ -51,8 +58,7 @@ const allTags = [...new Set(albums.flatMap((a) => a.tags || []))].sort();
       </div>
 
       <!-- 搜索框 + 标签筛选 -->
-      {albums.length > 0 && (
-        <gallery-filter class="mb-6">
+      <gallery-filter class:list={["mb-6", { hidden: albums.length === 0 }]} data-gallery-filter>
           <div class="relative mb-3">
             <Icon is:inline
               name="material-symbols:search"
@@ -65,8 +71,7 @@ const allTags = [...new Set(albums.flatMap((a) => a.tags || []))].sort();
               class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-(--line-divider) bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:border-(--primary) focus:ring-1 focus:ring-(--primary) outline-none transition-all duration-200 text-sm"
             />
           </div>
-          {allTags.length > 0 && (
-            <div class="flex flex-wrap gap-2">
+            <div class="flex flex-wrap gap-2" data-gallery-tags>
               <button
                 data-tag="all"
                 class="category-pill px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-200"
@@ -83,14 +88,10 @@ const allTags = [...new Set(albums.flatMap((a) => a.tags || []))].sort();
                 </button>
               ))}
             </div>
-          )}
         </gallery-filter>
-      )}
 
       <!-- 相册卡片网格 -->
-      {albums.length > 0 ? (
-        <>
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 my-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 my-4" data-gallery-albums-grid>
             {albums.map((album) => (
               <AlbumCard
                 id={album.id}
@@ -102,25 +103,21 @@ const allTags = [...new Set(albums.flatMap((a) => a.tags || []))].sort();
                 tags={album.tags}
                 photoCount={album.photoCount}
                 encrypted={!!album.password}
+                href={album.source === "remote" && album.remoteId
+					? `${runtimePhotoWallDetailUrl}?id=${encodeURIComponent(album.remoteId)}`
+					: undefined}
               />
             ))}
           </div>
           {/* 搜索无结果提示 */}
-          <div class="albums-empty hidden flex-col items-center justify-center py-12 text-neutral-400 dark:text-neutral-500">
+          <div class:list={["albums-empty flex-col items-center justify-center py-12 text-neutral-400 dark:text-neutral-500", { hidden: albums.length > 0, flex: albums.length === 0 }]}>
             <Icon is:inline name="material-symbols:search-off-rounded" class="text-4xl mb-3" />
-            <div class="text-sm">{i18n(I18nKey.searchNoResults)}</div>
+            <div class="text-sm" data-gallery-empty-text>{albums.length > 0 ? i18n(I18nKey.searchNoResults) : i18n(I18nKey.galleryNoAlbums)}</div>
           </div>
-        </>
-      ) : (
-        <div class="flex flex-col items-center justify-center py-16 text-neutral-400 dark:text-neutral-500">
-          <Icon is:inline name="material-symbols:photo-library" class="text-6xl mb-4 opacity-50" />
-          <p class="text-lg">{i18n(I18nKey.galleryNoAlbums)}</p>
-        </div>
-      )}
     </div>
   </div>
 
-  <script slot="head" is:inline>
+  <script slot="head" is:inline define:vars={{ browserPhotoWallEndpoint, runtimePhotoWallDetailUrl, allText: i18n(I18nKey.all), photosText: i18n(I18nKey.galleryPhotos), noAlbumsText: i18n(I18nKey.galleryNoAlbums), noResultsText: i18n(I18nKey.searchNoResults) }}>
     if (!customElements.get("gallery-filter")) {
       class GalleryFilter extends HTMLElement {
         selectedTag = "all";
@@ -198,10 +195,155 @@ const allTags = [...new Set(albums.flatMap((a) => a.tags || []))].sort();
           if (emptyEl) {
             emptyEl.classList.toggle("hidden", hasVisible);
             emptyEl.classList.toggle("flex", !hasVisible);
+            emptyEl.querySelector("[data-gallery-empty-text]").textContent = noResultsText;
           }
         }
       }
       customElements.define("gallery-filter", GalleryFilter);
     }
+
+    (function initRuntimePhotoWallAlbums() {
+      if (window.__fireflyRuntimePhotoWallAlbumsBound) return;
+      window.__fireflyRuntimePhotoWallAlbumsBound = true;
+
+      function normalizeText(value) {
+        return typeof value === "string" ? value.trim() : "";
+      }
+
+      function escapeHtml(value) {
+        return normalizeText(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function toDateText(value) {
+        const text = normalizeText(value);
+        if (!text) return "";
+        const dateText = text.includes("T") ? text.split("T")[0] : text.slice(0, 10);
+        return /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? dateText : "";
+      }
+
+      function getEndpoints(endpoint) {
+        if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+        const hostname = window.location.hostname;
+        if (hostname === "localhost" || hostname === "127.0.0.1") {
+          const localBackendEndpoint = "http://localhost:8090/api/user/photo-wall-categories";
+          return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+        }
+        return [endpoint];
+      }
+
+      async function fetchAlbums() {
+        for (const endpoint of getEndpoints(browserPhotoWallEndpoint)) {
+          try {
+            const response = await fetch(endpoint, {
+              headers: { Accept: "application/json" },
+              cache: "no-store",
+            });
+            if (!response.ok) continue;
+            const payload = await response.json();
+            if (payload?.code !== 200 || !Array.isArray(payload.data)) continue;
+            return payload.data;
+          } catch (error) {
+            console.warn("照片墙分类运行时加载失败。", error);
+          }
+        }
+        return null;
+      }
+
+      function normalizeAlbum(category) {
+        const remoteId = normalizeText(String(category?.id ?? ""));
+        const name = normalizeText(category?.name);
+        if (!remoteId || !name) return null;
+        const previewImages = Array.isArray(category?.previewImages)
+          ? category.previewImages.map(normalizeText).filter(Boolean)
+          : [];
+        return {
+          id: `photo-wall-${remoteId}`,
+          remoteId,
+          name,
+          cover: previewImages[0] || "",
+          photoCount: Math.max(0, Number(category?.photoCount) || 0),
+          date: toDateText(category?.updatedAt),
+          tags: ["照片墙"],
+        };
+      }
+
+      function renderTags(tags) {
+        const container = document.querySelector("[data-gallery-tags]");
+        if (!container) return;
+        container.replaceChildren();
+        const allButton = document.createElement("button");
+        allButton.dataset.tag = "all";
+        allButton.className = "category-pill px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-200";
+        allButton.setAttribute("data-active", "");
+        allButton.textContent = allText;
+        container.append(allButton);
+
+        for (const tag of tags) {
+          const button = document.createElement("button");
+          button.dataset.tag = tag;
+          button.className = allButton.className;
+          button.textContent = tag;
+          container.append(button);
+        }
+      }
+
+      function createAlbumCard(album) {
+        const link = document.createElement("a");
+        link.href = `${runtimePhotoWallDetailUrl}?id=${encodeURIComponent(album.remoteId)}`;
+        link.dataset.tags = album.tags.join(",");
+        link.className = "album-card group relative block overflow-hidden rounded-xl transition-all duration-300 hover:shadow-lg hover:scale-[1.02]";
+        const imageHtml = album.cover
+          ? `<div class="lqip-placeholder absolute inset-0 pointer-events-none" style="background: var(--muted)" aria-hidden="true"></div><img src="${escapeHtml(album.cover)}" alt="${escapeHtml(album.name)}" class="w-full h-full object-cover pointer-events-none opacity-0 transition-all duration-500 ease-out group-hover:scale-105" loading="lazy" decoding="async">`
+          : `<div class="w-full h-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center"><div class="text-gray-400 text-5xl">&#x1f4f7;</div></div>`;
+        link.innerHTML = `<div class="aspect-4/3 relative overflow-hidden">${imageHtml}<div class="absolute top-2 right-2 px-2 py-1 rounded-full text-xs text-white font-medium bg-black/50 backdrop-blur-sm">${album.photoCount} ${escapeHtml(photosText)}</div><div class="absolute inset-0 bg-linear-to-t from-black/70 via-black/20 to-transparent"></div><div class="absolute bottom-0 left-0 right-0 p-4"><h3 class="font-bold text-base text-white line-clamp-1 drop-shadow-lg">${escapeHtml(album.name)}</h3><div class="flex items-center gap-3 text-xs text-white/70 mt-1.5 flex-wrap">${album.date ? `<span>${escapeHtml(album.date)}</span>` : ""}</div><div class="flex flex-wrap gap-1 mt-2">${album.tags.map((tag) => `<span class="text-[0.6rem] px-1.5 py-0.5 rounded bg-white/20 text-white/90 backdrop-blur-sm">${escapeHtml(tag)}</span>`).join("")}</div></div></div>`;
+        link.querySelectorAll("img").forEach((img) => {
+          img.addEventListener("load", () => {
+            img.style.opacity = "1";
+            img.previousElementSibling?.classList.add("loaded");
+          }, { once: true });
+          if (img.complete) img.dispatchEvent(new Event("load"));
+        });
+        return link;
+      }
+
+      function renderAlbums(albums) {
+        const grid = document.querySelector("[data-gallery-albums-grid]");
+        const filter = document.querySelector("[data-gallery-filter]");
+        const empty = document.querySelector(".albums-empty");
+        const emptyText = empty?.querySelector("[data-gallery-empty-text]");
+        if (!grid) return;
+
+        grid.replaceChildren(...albums.map(createAlbumCard));
+        filter?.classList.toggle("hidden", albums.length === 0);
+        if (filter) filter.selectedTag = "all";
+        empty?.classList.toggle("hidden", albums.length > 0);
+        empty?.classList.toggle("flex", albums.length === 0);
+        if (emptyText) emptyText.textContent = albums.length > 0 ? noResultsText : noAlbumsText;
+
+        const tags = [...new Set(albums.flatMap((album) => album.tags))].sort();
+        renderTags(tags);
+        filter?.applyFilters?.();
+      }
+
+      async function loadAlbums() {
+        const payload = await fetchAlbums();
+        if (!payload) return;
+        const albums = payload.map(normalizeAlbum).filter(Boolean);
+        renderAlbums(albums);
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", loadAlbums, { once: true });
+      } else {
+        loadAlbums();
+      }
+      document.addEventListener("astro:page-load", loadAlbums);
+      document.addEventListener("swup:contentReplaced", loadAlbums);
+    })();
   </script>
 </MainGridLayout>

@@ -5,11 +5,11 @@ import { i18n } from "@/i18n/translation";
 import { url } from "@/utils/url-utils";
 
 const config = musicPlayerConfig;
+const isFullUrl = (path: string) => /^https?:\/\//.test(path);
 
 const localPlaylist =
-	config.mode === "local" && config.local?.playlist
+	config.local?.playlist
 		? config.local.playlist.map((song) => {
-				const isFullUrl = (path: string) => /^https?:\/\//.test(path);
 				return {
 					name: song.name,
 					artist: song.artist,
@@ -27,9 +27,27 @@ const localPlaylist =
 				};
 			})
 		: [];
+const remoteMusicEndpoint =
+	import.meta.env.PUBLIC_QAWKH_MUSIC_SONGS_ENDPOINT ||
+	config.remote?.endpoint ||
+	"/api/user/music-songs";
+const publicRemoteApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const browserMusicEndpoint =
+	remoteMusicEndpoint.startsWith("http://") ||
+	remoteMusicEndpoint.startsWith("https://") ||
+	!publicRemoteApiBase
+		? remoteMusicEndpoint
+		: `${publicRemoteApiBase.replace(/\/$/, "")}/${remoteMusicEndpoint.replace(/^\/+/, "")}`;
 
 const managerConfigStr = JSON.stringify({
-	mode: config.mode,
+	mode: config.mode ?? "meting",
+	remote: {
+		enabled:
+			config.remote?.enable !== false &&
+			import.meta.env.PUBLIC_QAWKH_MUSIC_SONGS_ENABLED !== "false",
+		endpoint: browserMusicEndpoint,
+		fallbackMode: config.remote?.fallbackMode ?? "meting",
+	},
 	meting: config.meting,
 	localPlaylist: localPlaylist,
 	volume: config.volume ?? 0.7,
@@ -71,6 +89,17 @@ const managerConfigStr = JSON.stringify({
         return min + ':' + (sec < 10 ? '0' : '') + sec;
     }
 
+    function normalizeText(value) {
+        return typeof value === 'string' ? value.trim() : '';
+    }
+
+    function normalizeRemoteAsset(value, apiOrigin) {
+        var text = normalizeText(value);
+        if (!text) return '';
+        if (/^(https?:)?\/\//i.test(text) || /^(data|blob):/i.test(text)) return text;
+        return apiOrigin.replace(/\/$/, '') + '/' + text.replace(/^\/+/, '');
+    }
+
     function parseLRC(lrc) {
         if (!lrc) return [];
         var lines = lrc.split('\n');
@@ -96,7 +125,6 @@ const managerConfigStr = JSON.stringify({
 
     // ── Audio element (persistent, attached to body) ────────
     var audio = document.createElement('audio');
-    audio.crossOrigin = 'anonymous';
     audio.style.display = 'none';
     document.body.appendChild(audio);
 
@@ -168,6 +196,100 @@ const managerConfigStr = JSON.stringify({
         throw new Error('All Meting APIs failed');
     }
 
+    // ── qawkh music fetch ────────────────────────────────────
+    function getRemoteMusicEndpoints(endpoint) {
+        if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+        var hostname = window.location.hostname;
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            var localBackendEndpoint = 'http://localhost:8090/api/user/music-songs';
+            return localBackendEndpoint === endpoint
+                ? [endpoint]
+                : [localBackendEndpoint, endpoint];
+        }
+        return [endpoint];
+    }
+
+    function getSongRecords(payload) {
+        if (Array.isArray(payload)) return payload;
+        if (payload && payload.code === 200 && Array.isArray(payload.data)) return payload.data;
+        if (payload && payload.code === 200 && Array.isArray(payload.data?.records)) return payload.data.records;
+        return [];
+    }
+
+    function mapRemoteSong(song, apiOrigin) {
+        var trackUrl = normalizeRemoteAsset(song?.audioUrl, apiOrigin);
+        if (!trackUrl) return null;
+        return {
+            name: normalizeText(song?.title) || 'Unknown',
+            artist: normalizeText(song?.artist) || 'Unknown',
+            url: trackUrl,
+            pic: normalizeRemoteAsset(song?.coverImage, apiOrigin),
+            lrc: normalizeText(song?.lyrics)
+        };
+    }
+
+    async function fetchRemoteMusicData() {
+        if (!config.remote || !config.remote.enabled || !config.remote.endpoint) {
+            throw new Error('Remote music disabled');
+        }
+
+        var errors = [];
+        var endpoints = getRemoteMusicEndpoints(config.remote.endpoint);
+        for (var i = 0; i < endpoints.length; i++) {
+            try {
+                var endpointUrl = new URL(endpoints[i], window.location.origin).toString();
+                var response = await fetch(endpointUrl, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                var payload = await response.json();
+                var apiOrigin = new URL(endpointUrl).origin;
+                var songs = getSongRecords(payload)
+                    .map(function (song) { return mapRemoteSong(song, apiOrigin); })
+                    .filter(function (song) { return !!song; });
+
+                if (songs.length > 0) {
+                    state.playlist = songs;
+                    return;
+                }
+                throw new Error('No remote songs');
+            } catch (e) {
+                errors.push(e);
+            }
+        }
+        throw errors[0] || new Error('Remote music failed');
+    }
+
+    async function loadPlaylistByMode(mode) {
+        if (mode === 'remote') {
+            await fetchRemoteMusicData();
+        } else if (mode === 'meting' && config.meting) {
+            await fetchMetingData();
+        } else if (mode === 'local') {
+            state.playlist = config.localPlaylist || [];
+        } else {
+            state.playlist = [];
+        }
+    }
+
+    async function loadConfiguredPlaylist() {
+        var mode = config.mode || 'meting';
+        if (mode !== 'remote') {
+            await loadPlaylistByMode(mode);
+            return;
+        }
+
+        try {
+            await loadPlaylistByMode('remote');
+            if (state.playlist.length > 0) return;
+        } catch (e) {
+            console.warn('qawkh 音乐接口加载失败，继续使用兜底歌单。', e);
+        }
+
+        var fallbackMode = config.remote?.fallbackMode || 'meting';
+        if (fallbackMode && fallbackMode !== 'none') {
+            await loadPlaylistByMode(fallbackMode);
+        }
+    }
+
     // ── Lyrics ───────────────────────────────────────────────
     function loadLyrics(track) {
         state.lyrics = [];
@@ -235,6 +357,10 @@ const managerConfigStr = JSON.stringify({
             audio.play().then(function () {
                 state.isPlaying = true;
                 emit('fm:play-state', { isPlaying: true });
+            }).catch(function (e) {
+                state.error = 'Audio playback error';
+                emit('fm:error', { message: state.error });
+                console.warn('Audio play failed:', e);
             });
         } else {
             audio.pause();
@@ -246,7 +372,11 @@ const managerConfigStr = JSON.stringify({
     function playNext(auto) {
         if (state.playMode === 1 && auto) {
             audio.currentTime = 0;
-            audio.play();
+            audio.play().catch(function (e) {
+                state.error = 'Audio playback error';
+                emit('fm:error', { message: state.error });
+                console.warn('Audio play failed:', e);
+            });
             return;
         }
         var nextIndex;
@@ -355,11 +485,7 @@ const managerConfigStr = JSON.stringify({
         state.initializing = true;
 
         try {
-            if (config.mode === 'meting' && config.meting) {
-                await fetchMetingData();
-            } else if (config.mode === 'local') {
-                state.playlist = config.localPlaylist || [];
-            }
+            await loadConfiguredPlaylist();
 
             if (state.playlist.length > 0) {
                 // Apply volume

@@ -10,7 +10,9 @@ export type WidgetComponentType =
 	| "calendar"
 	| "music"
 	| "siteInfo"
-	| "dynamic";
+	| "dynamic"
+	| "specialDates"
+	| "weather";
 
 export type WidgetComponentConfig = {
 	type: WidgetComponentType; // 组件类型
@@ -41,6 +43,17 @@ export type WidgetSpecificConfig = {
 	ad?: AdConfig; // 广告组件专用配置
 	siteInfo?: SiteInfoConfig; // 站点信息组件专用配置
 	dynamic?: DynamicWidgetConfig; // 最新动态组件专用配置
+	specialDates?: SpecialDatesWidgetConfig; // 特殊日期组件专用配置
+	weather?: WeatherWidgetConfig; // 天气组件专用配置
+};
+
+export type SpecialDatesWidgetConfig = {
+	endpoint?: string; // 特殊日期接口地址，默认 /api/user/special-dates
+	limit?: number; // 显示数量，最多 3 条
+};
+
+export type WeatherWidgetConfig = {
+	endpoint?: string; // 天气接口地址，默认 /api/user/weather
 };
 
 export type DynamicWidgetConfig = {

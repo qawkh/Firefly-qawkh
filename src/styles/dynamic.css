@@ -302,7 +302,7 @@ dynamic-feed {
 	display: block;
 	box-sizing: border-box;
 	min-width: 0;
-	width: min(calc(100% - 3.75rem), 48rem);
+	width: min(calc(100% - 3.75rem), 52rem);
 	max-width: 100%;
 	margin: 0.875rem 0 0 3.75rem;
 }
@@ -317,14 +317,16 @@ dynamic-feed {
 	display: grid;
 	box-sizing: border-box;
 	min-width: 0;
-	width: min(100%, 34rem);
+	width: min(100%, 52rem);
 	max-width: 100%;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 0.25rem;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 0.35rem;
+	align-items: stretch;
 }
 
-.dynamic-gallery-grid[data-layout="three"] {
-	grid-template-columns: repeat(3, minmax(0, 1fr));
+.dynamic-gallery-grid[data-layout="two"] {
+	width: min(100%, 34rem);
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .dynamic-gallery-grid-item {
@@ -335,22 +337,22 @@ dynamic-feed {
 	overflow: hidden;
 	aspect-ratio: 1;
 	border: 0;
-	border-radius: calc(var(--radius-large) - 0.25rem);
+	border-radius: calc(var(--radius-large) - 0.15rem);
 	background: var(--btn-regular-bg);
 	cursor: pointer;
 	padding: 0;
 }
 
 .dynamic-gallery-grid[data-layout="single"] {
-	display: block;
-	width: fit-content;
+	display: grid;
+	width: min(100%, 17rem);
 	max-width: 100%;
+	grid-template-columns: minmax(0, 1fr);
 }
 
 .dynamic-gallery-grid[data-layout="single"] .dynamic-gallery-grid-item {
-	width: fit-content;
-	max-width: 100%;
-	aspect-ratio: auto;
+	width: 100%;
+	aspect-ratio: 1;
 }
 
 .dynamic-gallery-grid-item img {
@@ -362,11 +364,9 @@ dynamic-feed {
 }
 
 .dynamic-gallery-grid[data-layout="single"] img {
-	width: auto;
-	max-width: 100%;
-	max-height: min(32rem, 65vh);
-	height: auto;
-	object-fit: contain;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
 }
 
 .dynamic-gallery-more {
@@ -376,7 +376,7 @@ dynamic-feed {
 	place-items: center;
 	background: rgb(0 0 0 / 55%);
 	color: white;
-	font-size: 1.5rem;
+	font-size: 2rem;
 	font-weight: 600;
 }
 
@@ -690,7 +690,7 @@ dynamic-feed {
 	}
 
 	.dynamic-gallery-grid[data-layout="single"] img {
-		max-height: min(28rem, 65vh);
+		max-height: none;
 	}
 
 	.dynamic-gallery-nav {

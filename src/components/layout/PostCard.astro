@@ -1,17 +1,17 @@
 ---
-import type { CollectionEntry } from "astro:content";
-import { render } from "astro:content";
 import { Icon } from "astro-icon/components";
 import CoverImage from "@/components/common/CoverImage.astro";
 import PostMetadata from "@/components/layout/PostMeta.astro";
 import PostStats from "@/components/layout/PostStats.astro";
 import { siteConfig } from "@/config";
+import type { PostForList } from "@/utils/content-utils";
+import { getPostRemarkMeta } from "@/utils/content-utils";
 import { getApiUrlList, processCoverImageSync } from "@/utils/image-utils";
 import { getFileDirFromPath, getTagUrl } from "@/utils/url-utils";
 
 interface Props {
 	class?: string;
-	entry: CollectionEntry<"posts">;
+	entry: PostForList;
 	title: string;
 	url: string;
 	published: Date;
@@ -82,7 +82,7 @@ const showTagsAtBottom = metaShowTags && tagsPosition === "bottom";
 const descriptionClampLines = String(descriptionLines);
 const shouldClampDescription = descriptionLines > 0;
 
-const { remarkPluginFrontmatter } = await render(entry);
+const remarkPluginFrontmatter = await getPostRemarkMeta(entry);
 const descriptionText = description || remarkPluginFrontmatter.excerpt || "";
 const words = remarkPluginFrontmatter.words;
 const minutes = remarkPluginFrontmatter.minutes;

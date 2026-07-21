@@ -1,0 +1,690 @@
+---
+import Comment from "@components/comment/index.astro";
+import Markdown from "@components/common/Markdown.astro";
+import KatexManager from "@components/features/KatexManager.astro";
+import I18nKey from "@i18n/i18nKey";
+import { i18n } from "@i18n/translation";
+import MainGridLayout from "@layouts/MainGridLayout.astro";
+import { siteConfig } from "@/config/siteConfig";
+
+const title = i18n(I18nKey.postList) || siteConfig.title;
+const description = siteConfig.subtitle || siteConfig.title;
+const articlesEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ARTICLES_ENDPOINT || "/api/user/articles";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeArticlesUrl = /^https?:\/\//i.test(articlesEndpoint)
+	? articlesEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${articlesEndpoint.replace(/^\/+/, "")}`
+		: articlesEndpoint;
+---
+
+<MainGridLayout title={title} description={description} setOGTypeArticle={true}>
+	<KatexManager slot="head" />
+
+	<article class="runtime-post card-base z-10 px-6 md:px-9 pt-6 pb-4 relative w-full rounded-(--radius-large) overflow-hidden mb-4">
+		<div class="runtime-post-status" data-runtime-post-status role="status">
+			<span class="runtime-post-spinner" aria-hidden="true"></span>
+			<span>文章加载中...</span>
+		</div>
+
+		<div class="runtime-post-body hidden" data-runtime-post-body>
+			<div class="flex flex-row text-black/30 dark:text-white/30 gap-5 mb-3 transition onload-animation">
+				<div class="runtime-post-meta-pill">
+					<span>字数</span>
+					<strong data-runtime-post-words>0</strong>
+				</div>
+				<div class="runtime-post-meta-pill">
+					<span>阅读</span>
+					<strong data-runtime-post-minutes>0 分钟</strong>
+				</div>
+			</div>
+
+			<div class="relative onload-animation">
+				<h1
+					data-pagefind-body
+					data-pagefind-weight="10"
+					data-pagefind-meta="title"
+					data-runtime-post-title
+					class="transition w-full block font-bold mb-3 text-3xl md:text-[2.25rem]/[2.75rem] text-black/90 dark:text-white/90 md:before:w-1 before:h-5 before:rounded-md before:bg-(--primary) before:absolute before:top-3 before:-left-4.5"
+				></h1>
+			</div>
+
+			<div class="runtime-post-inline-meta onload-animation mb-5">
+				<span data-runtime-post-published></span>
+				<a data-runtime-post-category class="hidden link-lg transition hover:text-(--primary) dark:hover:text-(--primary)"></a>
+				<span data-runtime-post-tags></span>
+			</div>
+
+			<img
+				data-runtime-post-cover
+				class="hidden w-full max-h-[28rem] object-cover rounded-xl mb-8 onload-animation"
+				alt=""
+				loading="eager"
+				decoding="async"
+			/>
+
+			<Markdown class="mb-6 markdown-content onload-animation">
+				<div data-runtime-post-content></div>
+			</Markdown>
+		</div>
+	</article>
+
+	<script is:inline>
+		(function syncRuntimePostCommentPath() {
+			const current = new URL(window.location.href);
+			const id = current.searchParams.get("id")?.trim();
+			if (!id || current.searchParams.get("path")) return;
+			current.searchParams.set("path", `/posts/${id}`);
+			history.replaceState(history.state, "", current);
+		})();
+	</script>
+
+	<Comment customPath="/posts/remote/" title={title} />
+
+	<script is:inline define:vars={{ runtimeArticlesUrl, siteTitle: siteConfig.title }}>
+	(function initRuntimePostDetail() {
+		function normalizeText(value) {
+			return typeof value === "string" ? value.trim() : "";
+		}
+
+		function escapeHtml(value) {
+			return normalizeText(value)
+				.replace(/&/g, "&amp;")
+				.replace(/</g, "&lt;")
+				.replace(/>/g, "&gt;")
+				.replace(/"/g, "&quot;")
+				.replace(/'/g, "&#39;");
+		}
+
+		function escapeAttribute(value) {
+			return escapeHtml(value).replace(/`/g, "&#96;");
+		}
+
+		function isSafeUrl(value, image = false) {
+			const text = normalizeText(value);
+			if (!text) return false;
+			if (text.startsWith("/") || text.startsWith("#")) return true;
+			if (/^https?:\/\//i.test(text)) return true;
+			if (!image && /^mailto:/i.test(text)) return true;
+			return image && /^data:image\/(png|gif|jpe?g|webp|avif);base64,/i.test(text);
+		}
+
+		function safeUrl(value, image = false) {
+			return isSafeUrl(value, image) ? normalizeText(value) : "#";
+		}
+
+		function toDate(value) {
+			const text = normalizeText(value);
+			if (!text) return new Date();
+			const date = new Date(text);
+			return Number.isNaN(date.getTime()) ? new Date() : date;
+		}
+
+		function formatDate(value) {
+			const date = toDate(value);
+			const year = date.getFullYear();
+			const month = String(date.getMonth() + 1).padStart(2, "0");
+			const day = String(date.getDate()).padStart(2, "0");
+			return `${year}-${month}-${day}`;
+		}
+
+		function countWords(markdown) {
+			const text = normalizeText(markdown)
+				.replace(/```[\s\S]*?```/g, " ")
+				.replace(/`[^`]*`/g, " ")
+				.replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+				.replace(/\[[^\]]*\]\([^)]*\)/g, " ")
+				.replace(/[>#*_~\-`|()[\]{}:]/g, " ")
+				.replace(/\s+/g, " ")
+				.trim();
+			const chineseChars = text.match(/[\u4e00-\u9fa5]/g) || [];
+			const englishWords = text.match(/[A-Za-z0-9]+/g) || [];
+			return chineseChars.length + englishWords.length;
+		}
+
+		function slugify(text, fallback) {
+			const slug = normalizeText(text)
+				.toLowerCase()
+				.replace(/<[^>]+>/g, "")
+				.replace(/[^\p{L}\p{N}\s-]/gu, "")
+				.replace(/\s+/g, "-")
+				.replace(/-+/g, "-");
+			return slug || fallback;
+		}
+
+		function splitTableCells(value) {
+			let text = normalizeText(value);
+			if (text.startsWith("|")) text = text.slice(1);
+			if (text.endsWith("|")) text = text.slice(0, -1);
+
+			const cells = [];
+			let current = "";
+			let escaped = false;
+
+			for (const char of text) {
+				if (escaped) {
+					current += char === "|" ? "|" : `\\${char}`;
+					escaped = false;
+					continue;
+				}
+
+				if (char === "\\") {
+					escaped = true;
+					continue;
+				}
+
+				if (char === "|") {
+					cells.push(current.trim());
+					current = "";
+					continue;
+				}
+
+				current += char;
+			}
+
+			if (escaped) current += "\\";
+			cells.push(current.trim());
+			return cells;
+		}
+
+		function normalizeTableCells(cells, length) {
+			return Array.from({ length }, (_, index) => cells[index] || "");
+		}
+
+		function isTableDelimiterCell(value) {
+			return /^:?-{3,}:?$/.test(normalizeText(value).replace(/\s+/g, ""));
+		}
+
+		function isTableDelimiterLine(value) {
+			const cells = splitTableCells(value);
+			return cells.length > 0 && cells.every(isTableDelimiterCell);
+		}
+
+		function isTableStart(lines, index) {
+			const headerLine = normalizeText(lines[index]);
+			const delimiterLine = normalizeText(lines[index + 1]);
+			if (!headerLine.includes("|") || !delimiterLine.includes("|")) return false;
+
+			const headers = splitTableCells(headerLine);
+			const delimiters = splitTableCells(delimiterLine);
+			if (!headers.length || headers.every((cell) => !cell)) return false;
+			if (headers.length !== delimiters.length) return false;
+			return delimiters.every(isTableDelimiterCell);
+		}
+
+		function getTableAlignment(value) {
+			const text = normalizeText(value).replace(/\s+/g, "");
+			if (text.startsWith(":") && text.endsWith(":")) return "center";
+			if (text.endsWith(":")) return "right";
+			if (text.startsWith(":")) return "left";
+			return "";
+		}
+
+		function renderTableCells(cells, tagName, alignments) {
+			return cells
+				.map((cell, index) => {
+					const alignment = alignments[index] || "";
+					const alignmentAttr = alignment ? ` style="text-align:${alignment}"` : "";
+					return `<${tagName}${alignmentAttr}>${renderInline(cell)}</${tagName}>`;
+				})
+				.join("");
+		}
+
+		function renderTable(headerLine, delimiterLine, bodyLines) {
+			const alignments = splitTableCells(delimiterLine).map(getTableAlignment);
+			const headers = normalizeTableCells(splitTableCells(headerLine), alignments.length);
+			const rows = bodyLines
+				.map((row) => normalizeTableCells(splitTableCells(row), headers.length))
+				.map((cells) => `<tr>${renderTableCells(cells, "td", alignments)}</tr>`)
+				.join("");
+			const thead = `<thead><tr>${renderTableCells(headers, "th", alignments)}</tr></thead>`;
+			const tbody = rows ? `<tbody>${rows}</tbody>` : "";
+			return `<div class="horizontal-scroll-container"><table>${thead}${tbody}</table></div>`;
+		}
+
+		function renderCodeBlock(language, codeLines) {
+			const languageName = normalizeText(language) || "text";
+			const languageAttr = languageName ? ` data-language="${escapeAttribute(languageName)}"` : "";
+			const codeClass = languageName ? ` class="language-${escapeAttribute(languageName)}"` : "";
+			return `<figure class="runtime-code-frame"${languageAttr}><figcaption class="runtime-code-toolbar"><span>${escapeHtml(languageName)}</span><button type="button" class="runtime-code-copy" data-runtime-code-copy>复制</button></figcaption><pre><code${codeClass}>${escapeHtml(codeLines.join("\n"))}</code></pre></figure>`;
+		}
+
+		function renderInline(value) {
+			let html = escapeHtml(value);
+			html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g, (_, alt, src, title) => {
+				const url = safeUrl(src, true);
+				const titleAttr = title ? ` title="${escapeAttribute(title)}"` : "";
+				return `<img src="${escapeAttribute(url)}" alt="${escapeAttribute(alt)}"${titleAttr} loading="lazy" decoding="async">`;
+			});
+			html = html.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g, (_, text, href, title) => {
+				const url = safeUrl(href);
+				const titleAttr = title ? ` title="${escapeAttribute(title)}"` : "";
+				const external = /^https?:\/\//i.test(url) ? ' target="_blank" rel="noopener noreferrer"' : "";
+				return `<a href="${escapeAttribute(url)}"${titleAttr}${external}>${text}</a>`;
+			});
+			html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+			html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+			html = html.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+			html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
+			html = html.replace(/(?<!_)_([^_]+)_(?!_)/g, "<em>$1</em>");
+			return html;
+		}
+
+		function renderMarkdown(markdown) {
+			const lines = normalizeText(markdown).replace(/\r\n/g, "\n").split("\n");
+			const html = [];
+			let paragraph = [];
+			let listType = "";
+			let codeFence = null;
+			let codeLines = [];
+			const usedSlugs = new Map();
+
+			function flushParagraph() {
+				if (paragraph.length === 0) return;
+				html.push(`<p>${paragraph.map(renderInline).join("<br>")}</p>`);
+				paragraph = [];
+			}
+
+			function closeList() {
+				if (!listType) return;
+				html.push(`</${listType}>`);
+				listType = "";
+			}
+
+			let index = 0;
+			while (index < lines.length) {
+				const rawLine = lines[index] || "";
+				const fence = /^(```|~~~)\s*(.*)$/.exec(rawLine.trimEnd());
+
+				if (codeFence) {
+					if (fence && fence[1] === codeFence.marker) {
+						html.push(renderCodeBlock(codeFence.language, codeLines));
+						codeFence = null;
+						codeLines = [];
+					} else {
+						codeLines.push(rawLine);
+					}
+					index += 1;
+					continue;
+				}
+
+				if (fence) {
+					flushParagraph();
+					closeList();
+					codeFence = {
+						marker: fence[1],
+						language: normalizeText(fence[2]).split(/\s+/)[0] || "text",
+					};
+					index += 1;
+					continue;
+				}
+
+				const line = rawLine.trim();
+				if (!line) {
+					flushParagraph();
+					closeList();
+					index += 1;
+					continue;
+				}
+
+				if (/^---+$/.test(line)) {
+					flushParagraph();
+					closeList();
+					html.push("<hr>");
+					index += 1;
+					continue;
+				}
+
+				if (isTableStart(lines, index)) {
+					flushParagraph();
+					closeList();
+					const headerLine = lines[index] || "";
+					const delimiterLine = lines[index + 1] || "";
+					const bodyLines = [];
+					index += 2;
+
+					while (index < lines.length) {
+						const rowLine = normalizeText(lines[index]);
+						if (!rowLine || !rowLine.includes("|") || isTableDelimiterLine(rowLine)) break;
+						bodyLines.push(rowLine);
+						index += 1;
+					}
+
+					html.push(renderTable(headerLine, delimiterLine, bodyLines));
+					continue;
+				}
+
+				const heading = /^(#{1,6})\s+(.+?)\s*#*$/.exec(line);
+				if (heading) {
+					flushParagraph();
+					closeList();
+					const level = heading[1].length;
+					const text = heading[2].trim();
+					const baseSlug = slugify(text, `heading-${usedSlugs.size + 1}`);
+					const usedCount = usedSlugs.get(baseSlug) || 0;
+					usedSlugs.set(baseSlug, usedCount + 1);
+					const id = usedCount > 0 ? `${baseSlug}-${usedCount}` : baseSlug;
+					html.push(`<h${level} id="${escapeAttribute(id)}">${renderInline(text)}<a class="anchor" href="#${escapeAttribute(id)}" aria-label="链接到该标题"><span class="anchor-icon" data-pagefind-ignore>#</span></a></h${level}>`);
+					index += 1;
+					continue;
+				}
+
+				const quote = /^>\s?(.*)$/.exec(line);
+				if (quote) {
+					flushParagraph();
+					closeList();
+					html.push(`<blockquote><p>${renderInline(quote[1])}</p></blockquote>`);
+					index += 1;
+					continue;
+				}
+
+				const unordered = /^[-*+]\s+(.+)$/.exec(line);
+				const ordered = /^\d+\.\s+(.+)$/.exec(line);
+				if (unordered || ordered) {
+					flushParagraph();
+					const nextType = unordered ? "ul" : "ol";
+					if (listType && listType !== nextType) closeList();
+					if (!listType) {
+						listType = nextType;
+						html.push(`<${listType}>`);
+					}
+					html.push(`<li>${renderInline((unordered || ordered)[1])}</li>`);
+					index += 1;
+					continue;
+				}
+
+				paragraph.push(line);
+				index += 1;
+			}
+
+			if (codeFence) {
+				html.push(renderCodeBlock(codeFence.language, codeLines));
+			}
+			flushParagraph();
+			closeList();
+			return html.join("\n");
+		}
+
+		function bindRuntimeCodeCopy() {
+			if (window.__fireflyRuntimeCodeCopyBound) return;
+			window.__fireflyRuntimeCodeCopyBound = true;
+
+			document.addEventListener("click", async (event) => {
+				const target = event.target;
+				if (!(target instanceof Element)) return;
+
+				const button = target.closest("[data-runtime-code-copy]");
+				if (!button) return;
+
+				const code = button.closest(".runtime-code-frame")?.querySelector("code")?.textContent || "";
+				if (!code) return;
+
+				try {
+					await navigator.clipboard.writeText(code);
+					button.textContent = "已复制";
+				} catch (_error) {
+					button.textContent = "复制失败";
+				}
+
+				window.setTimeout(() => {
+					button.textContent = "复制";
+				}, 1400);
+			});
+		}
+
+		function getArticleId() {
+			const params = new URLSearchParams(window.location.search);
+			return normalizeText(params.get("id"));
+		}
+
+		function getEndpoints(id) {
+			const endpoint = `${runtimeArticlesUrl.replace(/\/$/, "")}/${encodeURIComponent(id)}`;
+			if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+			const hostname = window.location.hostname;
+			if (hostname === "localhost" || hostname === "127.0.0.1") {
+				const localBackendEndpoint = `http://localhost:8090/api/user/articles/${encodeURIComponent(id)}`;
+				return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+			}
+			return [endpoint];
+		}
+
+		async function fetchArticle(id) {
+			for (const endpoint of getEndpoints(id)) {
+				try {
+					const response = await fetch(endpoint, {
+						headers: { Accept: "application/json" },
+						cache: "no-store",
+					});
+					if (!response.ok) continue;
+					const payload = await response.json();
+					if (payload?.code === 200 && payload.data) return payload.data;
+				} catch (error) {
+					console.warn("文章详情运行时加载失败。", error);
+				}
+			}
+			return null;
+		}
+
+		function renderStatus(message, failed) {
+			const status = document.querySelector("[data-runtime-post-status]");
+			if (!status) return;
+			status.classList.toggle("runtime-post-status-error", Boolean(failed));
+			status.innerHTML = failed
+				? `<span>${escapeHtml(message)}</span>`
+				: `<span class="runtime-post-spinner" aria-hidden="true"></span><span>${escapeHtml(message)}</span>`;
+		}
+
+		function setText(selector, value) {
+			const element = document.querySelector(selector);
+			if (element) element.textContent = value;
+		}
+
+		function showArticle(article, id) {
+			const title = normalizeText(article.title) || "未命名文章";
+			const markdown = normalizeText(article.contentMarkdown) || normalizeText(article.summary);
+			const words = countWords(markdown);
+			const minutes = words > 0 ? Math.max(1, Math.ceil(words / 400)) : 0;
+
+			setText("[data-runtime-post-title]", title);
+			setText("[data-runtime-post-published]", formatDate(article.publishedAt || article.updatedAt));
+			setText("[data-runtime-post-words]", String(words));
+			setText("[data-runtime-post-minutes]", `${minutes} 分钟`);
+
+			const category = document.querySelector("[data-runtime-post-category]");
+			const categoryName = normalizeText(article.categoryName);
+			if (category && categoryName) {
+				category.textContent = categoryName;
+				category.href = `/archive/?category=${encodeURIComponent(categoryName)}`;
+				category.classList.remove("hidden");
+			}
+
+			const tagsContainer = document.querySelector("[data-runtime-post-tags]");
+			const tags = Array.isArray(article.tags)
+				? article.tags.map((tag) => normalizeText(tag?.name || tag)).filter(Boolean)
+				: [];
+			if (tagsContainer && tags.length > 0) {
+				tagsContainer.innerHTML = tags
+					.map((tag) => `<a href="/archive/?tag=${encodeURIComponent(tag)}" class="link-lg transition hover:text-(--primary) dark:hover:text-(--primary)">#${escapeHtml(tag)}</a>`)
+					.join("<span class=\"runtime-post-divider\">/</span>");
+			}
+
+			const cover = document.querySelector("[data-runtime-post-cover]");
+			const coverImage = normalizeText(article.coverImage);
+			if (cover && coverImage) {
+				cover.src = coverImage;
+				cover.alt = title;
+				cover.classList.remove("hidden");
+			}
+
+			const content = document.querySelector("[data-runtime-post-content]");
+			if (content) content.innerHTML = renderMarkdown(markdown || "暂无正文。");
+			bindRuntimeCodeCopy();
+
+			document.title = `${title} - ${siteTitle}`;
+			const description = normalizeText(article.summary) || title;
+			document.querySelector('meta[name="description"]')?.setAttribute("content", description);
+			history.replaceState(history.state, "", `${window.location.pathname}?id=${encodeURIComponent(id)}&path=${encodeURIComponent(`/posts/${id}`)}`);
+
+			document.querySelector("[data-runtime-post-status]")?.classList.add("hidden");
+			document.querySelector("[data-runtime-post-body]")?.classList.remove("hidden");
+		}
+
+		async function loadArticle() {
+			const id = getArticleId();
+			if (!id) {
+				renderStatus("缺少文章 ID，无法加载文章。", true);
+				return;
+			}
+			const article = await fetchArticle(id);
+			if (!article) {
+				renderStatus("文章加载失败，请稍后刷新重试。", true);
+				return;
+			}
+			showArticle(article, id);
+		}
+
+		if (document.readyState === "loading") {
+			document.addEventListener("DOMContentLoaded", loadArticle, { once: true });
+		} else {
+			loadArticle();
+		}
+		document.addEventListener("astro:page-load", loadArticle);
+		})();
+	</script>
+</MainGridLayout>
+
+<style>
+	.runtime-post-status {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		min-height: 18rem;
+		justify-content: center;
+		color: var(--content-meta);
+	}
+
+	.runtime-post-status.hidden {
+		display: none;
+	}
+
+	.runtime-post-status-error {
+		color: var(--primary);
+	}
+
+	:global(.custom-md .runtime-code-frame) {
+		margin: 1rem 0;
+		overflow: hidden;
+		border: 1px solid color-mix(in oklch, var(--line-color) 78%, transparent);
+		border-radius: 0.75rem;
+		background: #1f2937;
+		box-shadow: 0 10px 26px color-mix(in oklch, black 14%, transparent);
+	}
+
+	:global([data-theme="one-light"] .custom-md .runtime-code-frame) {
+		background: #fafafa;
+		box-shadow: 0 10px 24px color-mix(in oklch, black 8%, transparent);
+	}
+
+	:global(body.wallpaper-transparent .custom-md .runtime-code-frame) {
+		background: var(--card-bg-transparent);
+	}
+
+	:global(.custom-md .runtime-code-toolbar) {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		min-height: 2.35rem;
+		padding: 0.45rem 0.75rem;
+		border-bottom: 1px solid color-mix(in oklch, var(--line-color) 72%, transparent);
+		color: var(--btn-content);
+		font-family: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+		font-size: 0.75rem;
+		font-weight: 700;
+		background: var(--btn-regular-bg);
+	}
+
+	:global(.custom-md .runtime-code-copy) {
+		padding: 0.2rem 0.55rem;
+		border: 1px solid var(--line-color);
+		border-radius: 0.45rem;
+		color: var(--btn-content);
+		background: transparent;
+		font: inherit;
+		cursor: pointer;
+		transition: background-color 0.2s ease, border-color 0.2s ease;
+	}
+
+	:global(.custom-md .runtime-code-copy:hover) {
+		background: var(--btn-plain-bg-hover);
+	}
+
+	:global(.custom-md .runtime-code-frame pre) {
+		margin: 0;
+		padding: 1rem;
+		overflow-x: auto;
+		background: transparent;
+	}
+
+	:global(.custom-md .runtime-code-frame code) {
+		display: block;
+		padding: 0;
+		color: #d7deea;
+		background: transparent;
+		font-family: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+		font-size: 0.875rem;
+		line-height: 1.5rem;
+		white-space: pre;
+	}
+
+	:global([data-theme="one-light"] .custom-md .runtime-code-frame code) {
+		color: #383a42;
+	}
+
+	.runtime-post-spinner {
+		width: 1.1rem;
+		height: 1.1rem;
+		border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent);
+		border-top-color: var(--primary);
+		border-radius: 999px;
+		animation: runtime-post-spin 0.8s linear infinite;
+	}
+
+	.runtime-post-meta-pill {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.875rem;
+	}
+
+	.runtime-post-meta-pill strong {
+		font-weight: 700;
+		color: var(--primary);
+	}
+
+	.runtime-post-inline-meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem;
+		color: var(--content-meta);
+		font-size: 0.875rem;
+		font-weight: 500;
+	}
+
+	.runtime-post-inline-meta :global(a) {
+		color: inherit;
+	}
+
+	.runtime-post-divider {
+		margin: 0 0.4rem;
+		color: var(--meta-divider);
+	}
+
+	@keyframes runtime-post-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+</style>

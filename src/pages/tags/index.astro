@@ -7,6 +7,14 @@ import { getTagList } from "@/utils/content-utils";
 import { getTagUrl } from "@/utils/url-utils";
 
 const tags = await getTagList();
+const articlesEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ARTICLES_ENDPOINT || "/api/user/articles";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeArticlesUrl = /^https?:\/\//i.test(articlesEndpoint)
+	? articlesEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${articlesEndpoint.replace(/^\/+/, "")}`
+		: articlesEndpoint;
 
 // Top 10 标签排行
 const topTags = [...tags].sort((a, b) => b.count - a.count).slice(0, 10);
@@ -20,13 +28,13 @@ const topMaxCount = topTags.length > 0 ? topTags[0].count : 1;
             {i18n(I18nKey.tags)}
         </div>
         <p class="text-30 text-sm">
-            {i18n(I18nKey.allTags)} · {tags.length} {i18n(I18nKey.tagsCount)}
+            <span>{i18n(I18nKey.allTags)} · </span><span data-runtime-tags-summary>{tags.length} {i18n(I18nKey.tagsCount)}</span>
         </p>
     </div>
 
     <div class="flex w-full rounded-(--radius-large) overflow-hidden relative min-h-32">
         <div class="card-base z-10 px-9 py-6 relative w-full">
-            <div class="flex flex-wrap gap-2.5">
+            <div class="flex flex-wrap gap-2.5" data-runtime-tags-list>
                 {tags.map((t) => (
                     <a href={getTagUrl(t.name)}
                        class="tag-item group inline-flex items-center gap-1.5 rounded-full
@@ -59,12 +67,11 @@ const topMaxCount = topTags.length > 0 ? topTags[0].count : 1;
     }
 
     <!-- Top 10 标签排行 -->
-    {topTags.length > 0 && (
-        <div class="card-base px-8 py-6 mt-4">
+    <div class:list={["card-base px-8 py-6 mt-4", { hidden: topTags.length === 0 }]} data-runtime-top-tags>
             <h2 class="text-lg font-bold text-75 mb-4">
                 Top 10
             </h2>
-            <div class="flex flex-col gap-3">
+            <div class="flex flex-col gap-3" data-runtime-top-tags-list>
                 {topTags.map((t, i) => (
                     <a href={getTagUrl(t.name)}
                        class="flex items-center gap-3 group hover:bg-(--btn-card-bg-hover) rounded-lg px-3 py-2 -mx-3 transition-colors"
@@ -92,5 +99,96 @@ const topMaxCount = topTags.length > 0 ? topTags[0].count : 1;
                 ))}
             </div>
         </div>
-    )}
 </MainGridLayout>
+
+<script is:inline define:vars={{ runtimeArticlesUrl, tagsCountText: i18n(I18nKey.tagsCount), postsCountText: i18n(I18nKey.postsCount) }}>
+    (function initRuntimeTagsPage() {
+        function normalizeText(value) {
+            return typeof value === "string" ? value.trim() : "";
+        }
+
+        function escapeHtml(value) {
+            return normalizeText(value)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        }
+
+        function getRuntimeEndpoints(endpoint) {
+            if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+            const hostname = window.location.hostname;
+            if (hostname === "localhost" || hostname === "127.0.0.1") {
+                const localBackendEndpoint = "http://localhost:8090/api/user/articles";
+                return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+            }
+            return [endpoint];
+        }
+
+        async function fetchArticles() {
+            for (const endpoint of getRuntimeEndpoints(runtimeArticlesUrl)) {
+                try {
+                    const response = await fetch(endpoint, {
+                        headers: { Accept: "application/json" },
+                        cache: "no-store",
+                    });
+                    if (!response.ok) continue;
+                    const payload = await response.json();
+                    if (payload?.code === 200 && Array.isArray(payload.data)) return payload.data;
+                } catch (error) {
+                    console.warn("标签页运行时文章加载失败。", error);
+                }
+            }
+            return null;
+        }
+
+        function getTagCounts(articles) {
+            const countMap = new Map();
+            for (const article of articles) {
+                const tags = Array.isArray(article?.tags)
+                    ? article.tags.map((tag) => normalizeText(tag?.name || tag)).filter(Boolean)
+                    : [];
+                for (const tag of tags) countMap.set(tag, (countMap.get(tag) || 0) + 1);
+            }
+            return Array.from(countMap.entries())
+                .map(([name, count]) => ({ name, count }))
+                .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+        }
+
+        function renderTagPill(tag) {
+            return `<a href="/archive/?tag=${encodeURIComponent(tag.name)}" class="tag-item group inline-flex items-center gap-1.5 rounded-full text-sm font-medium px-3 py-1.5 transition-all duration-200"><span>${escapeHtml(tag.name)}</span><span class="tag-count-badge text-xs font-bold px-1.5 rounded-full min-w-[1.5rem] text-center">${tag.count}</span></a>`;
+        }
+
+        function renderTopTag(tag, index, maxCount) {
+            const width = maxCount > 0 ? (tag.count / maxCount) * 100 : 0;
+            return `<a href="/archive/?tag=${encodeURIComponent(tag.name)}" class="flex items-center gap-3 group hover:bg-(--btn-card-bg-hover) rounded-lg px-3 py-2 -mx-3 transition-colors"><span class="text-sm font-bold text-(--primary) w-5 text-right shrink-0">${index + 1}</span><div class="flex-1 min-w-0"><div class="flex items-center justify-between mb-1"><span class="text-sm font-medium text-50 truncate group-hover:text-(--primary) transition-colors">#${escapeHtml(tag.name)}</span><span class="text-xs text-(--primary) ml-2 shrink-0">${tag.count} ${postsCountText}</span></div><div class="h-2 rounded-full bg-(--primary)/10 overflow-hidden"><div class="h-full rounded-full bg-(--primary) transition-all duration-500" style="width: ${width}%"></div></div></div></a>`;
+        }
+
+        async function refreshTags() {
+            const articles = await fetchArticles();
+            if (!articles) return;
+            const tags = getTagCounts(articles);
+            const list = document.querySelector("[data-runtime-tags-list]");
+            const summary = document.querySelector("[data-runtime-tags-summary]");
+            if (list) list.innerHTML = tags.map(renderTagPill).join("");
+            if (summary) summary.textContent = `${tags.length} ${tagsCountText}`;
+
+            const topTags = [...tags].sort((a, b) => b.count - a.count).slice(0, 10);
+            const topWrap = document.querySelector("[data-runtime-top-tags]");
+            const topList = document.querySelector("[data-runtime-top-tags-list]");
+            if (topWrap) topWrap.classList.toggle("hidden", topTags.length === 0);
+            if (topList) {
+                const maxCount = topTags[0]?.count || 1;
+                topList.innerHTML = topTags.map((tag, index) => renderTopTag(tag, index, maxCount)).join("");
+            }
+        }
+
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", refreshTags, { once: true });
+        } else {
+            refreshTags();
+        }
+        document.addEventListener("astro:page-load", refreshTags);
+    })();
+</script>

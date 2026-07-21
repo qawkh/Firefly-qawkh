@@ -9,6 +9,14 @@ import { getTagList } from "@/utils/content-utils";
 import { getTagUrl, url } from "@/utils/url-utils";
 
 const tags = await getTagList();
+const articlesEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ARTICLES_ENDPOINT || "/api/user/articles";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeArticlesUrl = /^https?:\/\//i.test(articlesEndpoint)
+	? articlesEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${articlesEndpoint.replace(/^\/+/, "")}`
+		: articlesEndpoint;
 
 const COLLAPSED_HEIGHT = "7.5rem";
 
@@ -24,7 +32,7 @@ const showTitle = widgetConfig?.showTitle !== false;
 const isCollapsed = collapseThreshold ? tags.length > collapseThreshold : false;
 ---
 <WidgetLayout name={i18n(I18nKey.tags)} showTitle={showTitle} id="tags" isCollapsed={isCollapsed} collapsedHeight={COLLAPSED_HEIGHT} useExpandedButtonSpacing={true} moreUrl={url("/tags/")} class={className} style={style}>
-    <div class="tags-container">
+    <div class="tags-container" data-runtime-widget-tags data-runtime-articles-url={runtimeArticlesUrl}>
         {tags.map(t => (
             <ButtonTag href={getTagUrl(t.name)} label={`View all posts with the ${t.name.trim()} tag`}>
                 {t.name.trim()}
@@ -32,6 +40,80 @@ const isCollapsed = collapseThreshold ? tags.length > collapseThreshold : false;
         ))}
     </div>
 </WidgetLayout>
+
+<script is:inline>
+  (function initRuntimeWidgetTags() {
+    function normalizeText(value) {
+      return typeof value === "string" ? value.trim() : "";
+    }
+
+    function escapeHtml(value) {
+      return normalizeText(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function getEndpoints(endpoint) {
+      if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+      const hostname = window.location.hostname;
+      if (hostname === "localhost" || hostname === "127.0.0.1") {
+        const localBackendEndpoint = "http://localhost:8090/api/user/articles";
+        return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+      }
+      return [endpoint];
+    }
+
+    async function fetchArticles(endpoint) {
+      for (const item of getEndpoints(endpoint)) {
+        try {
+          const response = await fetch(item, {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          });
+          if (!response.ok) continue;
+          const payload = await response.json();
+          if (payload?.code === 200 && Array.isArray(payload.data)) return payload.data;
+        } catch (error) {
+          console.warn("侧栏标签运行时文章加载失败。", error);
+        }
+      }
+      return null;
+    }
+
+    function renderTag(tag) {
+      return `<a href="/archive/?tag=${encodeURIComponent(tag.name)}" aria-label="View all posts with the ${escapeHtml(tag.name)} tag" class="transition text-sm font-medium px-3 py-1.5 rounded-full bg-black/5 dark:bg-white/10 text-neutral-500 dark:text-neutral-400 hover:bg-(--btn-regular-bg) hover:text-(--btn-content)">${escapeHtml(tag.name)}</a>`;
+    }
+
+    async function refreshTags() {
+      document.querySelectorAll("[data-runtime-widget-tags]").forEach(async (container) => {
+        const endpoint = container.getAttribute("data-runtime-articles-url") || "/api/user/articles";
+        const articles = await fetchArticles(endpoint);
+        if (!articles) return;
+        const countMap = new Map();
+        for (const article of articles) {
+          const tags = Array.isArray(article?.tags)
+            ? article.tags.map((tag) => normalizeText(tag?.name || tag)).filter(Boolean)
+            : [];
+          for (const tag of tags) countMap.set(tag, (countMap.get(tag) || 0) + 1);
+        }
+        const tags = Array.from(countMap.entries())
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+        if (tags.length > 0) container.innerHTML = tags.map(renderTag).join("");
+      });
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", refreshTags, { once: true });
+    } else {
+      refreshTags();
+    }
+    document.addEventListener("astro:page-load", refreshTags);
+  })();
+</script>
 
 <style>
   .tags-container {

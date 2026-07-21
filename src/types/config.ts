@@ -33,8 +33,10 @@ export type {
 	MobileBottomComponentConfig,
 	SidebarLayoutConfig,
 	SiteInfoConfig,
+	SpecialDatesWidgetConfig,
 	WidgetComponentConfig,
 	WidgetComponentType,
+	WeatherWidgetConfig,
 	WidgetSpecificConfig,
 } from "./sidebarConfig";
 export type {

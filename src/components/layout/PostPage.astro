@@ -1,16 +1,13 @@
 ---
-import type { CollectionEntry } from "astro:content";
-import { getPostUrlBySlug } from "@utils/url-utils";
+import { getPostUrlBySlug, url } from "@utils/url-utils";
 import PostCard from "@/components/layout/PostCard.astro";
 import { siteConfig } from "@/config";
+import type { PostForList } from "@/utils/content-utils";
 
 const { page } = Astro.props;
 
 let delay = 0;
 const interval = 50;
-
-// 类型别名避免Fragment语法问题
-type PostEntry = CollectionEntry<"posts">;
 
 const masonryEnabled = siteConfig.postListLayout.grid.masonry;
 const columnWidth = siteConfig.postListLayout.grid.columnWidth || 280;
@@ -23,6 +20,33 @@ const initialLayoutClass =
 	defaultLayout === "grid"
 		? "post-grid-auto grid-mode"
 		: "flex flex-col gap-4 md:gap-4 list-mode";
+const articlesEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ARTICLES_ENDPOINT || "/api/user/articles";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeArticlesUrl = /^https?:\/\//i.test(articlesEndpoint)
+	? articlesEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${articlesEndpoint.replace(/^\/+/, "")}`
+		: articlesEndpoint;
+const runtimePostDetailUrl = url("/posts/remote/");
+const runtimePageSize = page.size || siteConfig.pagination.postsPerPage;
+function getListSignaturePart(entry: PostForList) {
+	return encodeURIComponent(
+		JSON.stringify([
+			entry.id,
+			entry.data.title,
+			entry.data.description || "",
+			entry.data.image || "",
+			entry.data.category || "",
+			entry.data.tags || [],
+			Boolean(entry.data.pinned),
+			entry.data.published.getTime(),
+		]),
+	);
+}
+const renderedPostSignature = page.data
+	.map((entry: PostForList) => getListSignaturePart(entry))
+	.join("|");
 ---
 
 <div
@@ -32,10 +56,11 @@ const initialLayoutClass =
   data-mobile-default-layout={mobileDefaultLayout}
   data-masonry-enabled={masonryEnabled}
   data-column-width={columnWidth}
+  data-rendered-post-signature={renderedPostSignature}
   style={`--post-card-min-width: ${columnWidth}px;`}
 >
   {
-    page.data.map((entry: PostEntry, index: number) => (
+    page.data.map((entry: PostForList, index: number) => (
       <PostCard
         entry={entry}
         title={entry.data.title}
@@ -56,6 +81,216 @@ const initialLayoutClass =
     ))
   }
 </div>
+
+<script is:inline define:vars={{ runtimeArticlesUrl, runtimePostDetailUrl, runtimePageSize }}>
+  (function initRuntimeArticles() {
+    if (window.__fireflyRuntimeArticlesBound) return;
+    window.__fireflyRuntimeArticlesBound = true;
+
+    function normalizeText(value) {
+      return typeof value === "string" ? value.trim() : "";
+    }
+
+    function escapeHtml(value) {
+      return normalizeText(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function toTimestamp(value) {
+      const text = normalizeText(value);
+      if (!text) return Date.now();
+      const timestamp = Date.parse(text);
+      return Number.isNaN(timestamp) ? Date.now() : timestamp;
+    }
+
+    function toDateText(value) {
+      const date = new Date(toTimestamp(value));
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function getArticleSignature(article) {
+      return encodeURIComponent(JSON.stringify([
+        article.id,
+        article.title,
+        article.summary,
+        article.coverImage,
+        article.categoryName,
+        article.tags,
+        Boolean(article.pinned),
+        toTimestamp(article.publishedAt),
+      ]));
+    }
+
+    function getEndpoints(endpoint) {
+      if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+      const hostname = window.location.hostname;
+      if (hostname === "localhost" || hostname === "127.0.0.1") {
+        const localBackendEndpoint = "http://localhost:8090/api/user/articles";
+        return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+      }
+      return [endpoint];
+    }
+
+    async function fetchArticles() {
+      for (const endpoint of getEndpoints(runtimeArticlesUrl)) {
+        try {
+          const response = await fetch(endpoint, {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          });
+          if (!response.ok) continue;
+          const payload = await response.json();
+          if (payload?.code !== 200 || !Array.isArray(payload.data)) continue;
+          return payload.data;
+        } catch (error) {
+          console.warn("文章列表运行时加载失败。", error);
+        }
+      }
+      return null;
+    }
+
+    function normalizeArticle(article) {
+      const id = normalizeText(String(article?.id ?? ""));
+      const title = normalizeText(article?.title);
+      if (!id || !title) return null;
+      const tags = Array.isArray(article?.tags)
+        ? article.tags.map((tag) => normalizeText(tag?.name || tag)).filter(Boolean)
+        : [];
+      return {
+        id,
+        title,
+        summary: normalizeText(article?.summary),
+        coverImage: normalizeText(article?.coverImage),
+        categoryName: normalizeText(article?.categoryName),
+        tags,
+        publishedAt: article?.publishedAt,
+        updatedAt: article?.updatedAt,
+        pinned: Number(article?.isRecommended) === 1,
+      };
+    }
+
+    function getCurrentPage() {
+      const match = window.location.pathname.match(/^\/(\d+)\/?$/);
+      return match ? Math.max(1, Number(match[1]) || 1) : 1;
+    }
+
+    function getPostHref(id) {
+      return `${runtimePostDetailUrl}?id=${encodeURIComponent(id)}&path=${encodeURIComponent(`/posts/${id}`)}`;
+    }
+
+    function refreshRuntimeLayout(container) {
+      if (typeof window.updatePostListLayout !== "function") return;
+      const savedLayout = localStorage.getItem("postListLayout");
+      const defaultLayout = container.getAttribute("data-default-layout") || "list";
+      const mobileDefaultLayout = container.getAttribute("data-mobile-default-layout") || defaultLayout;
+      const effectiveDefault = window.innerWidth < 780 ? mobileDefaultLayout : defaultLayout;
+      const layout = window.innerWidth < 380 ? "grid" : (savedLayout || effectiveDefault);
+      window.updatePostListLayout(layout);
+      container.querySelectorAll("img").forEach((img) => {
+        if (img.complete) return;
+        img.addEventListener("load", () => window.updatePostListLayout(layout), { once: true });
+      });
+    }
+
+    function createTagLinks(tags) {
+      return tags
+        .slice(0, 4)
+        .map((tag) => `<a href="/archive/?tag=${encodeURIComponent(tag)}" class="transition text-xs font-medium px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10 text-neutral-500 dark:text-neutral-400 hover:bg-(--btn-regular-bg) hover:text-(--btn-content)">#${escapeHtml(tag)}</a>`)
+        .join("");
+    }
+
+    function iconSvg(name) {
+      if (name === "pin") {
+        return '<svg width="1em" height="1em" viewBox="0 0 24 24" class="text-xl" aria-hidden="true"><path fill="currentColor" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5v6h2v-6h5v-2z"/></svg>';
+      }
+      if (name === "calendar") {
+        return '<svg width="1em" height="1em" viewBox="0 0 24 24" class="text-xl" aria-hidden="true"><path fill="currentColor" d="M5 22q-.825 0-1.412-.587T3 20V6q0-.825.588-1.412T5 4h1V2h2v2h8V2h2v2h1q.825 0 1.413.588T21 6v14q0 .825-.587 1.413T19 22zm0-2h14V10H5z"/></svg>';
+      }
+      if (name === "book") {
+        return '<svg width="1em" height="1em" viewBox="0 0 24 24" class="text-xl" aria-hidden="true"><path fill="currentColor" d="M6 22q-.825 0-1.412-.587T4 20V5q0-1.25.875-2.125T7 2h13v17q0 .425-.288.713T19 20H7q-.425 0-.712.288T6 21zm1-4h11V4H7q-.425 0-.712.288T6 5v13.25q.225-.125.475-.187T7 18"/></svg>';
+      }
+      return "";
+    }
+
+    function createMeta(article) {
+      const category = article.categoryName || "未分类";
+      const pinnedHtml = article.pinned
+        ? `<div class="pinned-btn flex items-center gap-1 bg-(--btn-regular-bg) text-(--btn-content) rounded-md px-2 py-1.5 font-bold">${iconSvg("pin")}<span class="text-sm">置顶</span></div>`
+        : "";
+      return `<div class="post-meta-root flex flex-wrap text-neutral-500 dark:text-neutral-400 items-center gap-4 gap-x-4 gap-y-2 mb-4 post-meta card-header-meta">${pinnedHtml}<div class="flex items-center"><div class="meta-icon">${iconSvg("calendar")}</div><span class="text-50 text-sm font-medium">${toDateText(article.publishedAt)}</span></div><div class="flex items-center"><div class="meta-icon">${iconSvg("book")}</div><div class="flex flex-row flex-nowrap items-center"><a href="/archive/?category=${encodeURIComponent(category)}" aria-label="View all posts in the ${escapeHtml(category)} category" class="link-lg transition text-50 text-sm font-medium hover:text-(--primary) dark:hover:text-(--primary) whitespace-nowrap">${escapeHtml(category)}</a></div></div></div>`;
+    }
+
+    function createArticleCard(article, index) {
+      const href = getPostHref(article.id);
+      const hasCover = Boolean(article.coverImage);
+      const wrapper = document.createElement("div");
+      wrapper.className = `post-card-wrapper ${hasCover ? "has-cover" : "no-cover"} ${article.pinned ? "pinned" : ""} card-base flex flex-col-reverse w-full rounded-(--radius-large) overflow-hidden relative onload-animation post-card-item`;
+      wrapper.style.animationDelay = `calc(var(--content-delay) + ${index * 50}ms)`;
+      const coverHtml = hasCover
+        ? `<a href="${href}" aria-label="${escapeHtml(article.title)}" class="post-card-image group w-full md:w-[30%] aspect-2/1 md:aspect-auto relative md:absolute md:top-4 md:bottom-4 md:right-4 rounded-(--radius-large) md:rounded-xl overflow-hidden"><div class="absolute pointer-events-none z-10 w-full h-full group-hover:bg-black/30 group-active:bg-black/50 transition"></div><img src="${escapeHtml(article.coverImage)}" alt="${escapeHtml(article.title)}" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110 group-active:scale-115" loading="lazy" decoding="async"></a>`
+        : `<a href="${href}" aria-label="${escapeHtml(article.title)}" class="post-card-enter-btn flex btn-regular w-13 absolute right-3 top-3 bottom-3 rounded-xl bg-(--enter-btn-bg) hover:bg-(--enter-btn-bg-hover) active:bg-(--enter-btn-bg-active) active:scale-95"><span class="transition text-(--primary) text-4xl mx-auto">&rsaquo;</span></a>`;
+      wrapper.innerHTML = `<div class="post-card-content pl-4 md:pl-9 pr-4 md:pr-2 pt-4 md:pt-7 pb-4 md:pb-7 relative flex flex-col ${hasCover ? "w-full md:w-[calc(100%-30%-1.5rem)]" : "w-full md:w-[calc(100%-52px-12px)]"}"><a href="${href}" class="post-card-title transition group w-full block font-bold mb-3 text-3xl text-90 hover:text-(--primary) dark:hover:text-(--primary) active:text-(--title-active) dark:active:text-(--title-active) before:w-1 before:h-5 before:rounded-md before:bg-(--primary) before:absolute before:top-[35px] before:left-[18px] before:hidden md:before:block">${escapeHtml(article.title)}</a>${createMeta(article)}<div class="transition text-75 md:pr-4 description description-clamped" title="${escapeHtml(article.summary)}">${escapeHtml(article.summary)}</div><div class="post-card-bottom-tags flex flex-wrap items-center gap-1.5 mt-3">${createTagLinks(article.tags)}</div></div>${coverHtml}`;
+      return wrapper;
+    }
+
+    function renderPagination(totalItems, currentPage) {
+      const totalPages = Math.max(1, Math.ceil(totalItems / runtimePageSize));
+      document.querySelectorAll(".pagination-wrapper").forEach((node) => {
+        node.classList.add("hidden");
+      });
+      document.querySelector("[data-runtime-post-pagination]")?.remove();
+      if (totalPages <= 1) return;
+      const pagination = document.createElement("div");
+      pagination.dataset.runtimePostPagination = "";
+      pagination.className = "pagination-wrapper flex flex-col gap-4 items-center mx-auto onload-animation";
+      const pages = Array.from({ length: totalPages }, (_, index) => index + 1);
+      pagination.innerHTML = `<div class="flex flex-row gap-3 justify-center" role="navigation">${pages.map((page) => page === currentPage ? `<div class="h-11 w-11 rounded-(--radius-large) bg-(--primary) flex items-center justify-center font-bold text-white dark:text-black/70" aria-current="page">${page}</div>` : `<a href="${page === 1 ? "/" : `/${page}/`}" class="btn-card w-11 h-11 rounded-(--radius-large) overflow-hidden active:scale-[0.85] font-bold text-neutral-700 dark:text-neutral-300">${page}</a>`).join("")}</div>`;
+      document.getElementById("post-list-container")?.after(pagination);
+    }
+
+    async function loadArticles() {
+      const payload = await fetchArticles();
+      if (!payload) return;
+      const articles = payload
+        .map(normalizeArticle)
+        .filter(Boolean)
+        .sort((a, b) => {
+          if (a.pinned && !b.pinned) return -1;
+          if (!a.pinned && b.pinned) return 1;
+          return toTimestamp(b.publishedAt) - toTimestamp(a.publishedAt);
+        });
+      const currentPage = getCurrentPage();
+      const start = (currentPage - 1) * runtimePageSize;
+      const pageArticles = articles.slice(start, start + runtimePageSize);
+      const container = document.getElementById("post-list-container");
+      if (!container || pageArticles.length === 0) return;
+      const runtimeSignature = pageArticles.map(getArticleSignature).join("|");
+      if (runtimeSignature && runtimeSignature === container.dataset.renderedPostSignature) {
+        refreshRuntimeLayout(container);
+        return;
+      }
+      container.replaceChildren(...pageArticles.map(createArticleCard));
+      container.dataset.renderedPostSignature = runtimeSignature;
+      renderPagination(articles.length, currentPage);
+      refreshRuntimeLayout(container);
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", loadArticles, { once: true });
+    } else {
+      loadArticles();
+    }
+    document.addEventListener("astro:page-load", loadArticles);
+    document.addEventListener("swup:contentReplaced", loadArticles);
+  })();
+</script>
 
 <!-- 立即执行脚本：防止刷新时的布局闪烁 -->
 <script is:inline define:vars={{ defaultLayout, mobileDefaultLayout, columnWidth }}>
@@ -177,6 +412,8 @@ const initialLayoutClass =
         });
     }, 200);
   }
+
+  (window as Window & typeof globalThis & { updatePostListLayout?: (layout: string) => void }).updatePostListLayout = updatePostListLayout;
 
   function resetMasonryLayout() {
     const container = document.getElementById("post-list-container");
@@ -374,9 +611,29 @@ const initialLayoutClass =
     transform: translateY(10px);
   }
 
+  #post-list-container :global(.post-card-image) {
+    display: block !important;
+    overflow: hidden !important;
+  }
+
+  #post-list-container :global(.post-card-image > img),
+  #post-list-container :global(.post-card-image .cover-image-container),
+  #post-list-container :global(.post-card-image picture),
+  #post-list-container :global(.post-card-image picture > img) {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  #post-list-container :global(.post-card-image img) {
+    display: block !important;
+    object-fit: cover !important;
+  }
+
   /* Grid Mode Customization */
   #post-list-container.grid-mode :global(.post-card-wrapper) {
     flex-direction: column-reverse !important;
+    height: 100% !important;
+    justify-content: flex-end !important;
   }
 
   #post-list-container.grid-mode :global(.post-card-image) {
@@ -385,13 +642,27 @@ const initialLayoutClass =
     top: auto !important;
     right: auto !important;
     bottom: auto !important;
+    margin: 0 !important;
     border-radius: var(--radius-large) var(--radius-large) 0 0 !important;
-    /*aspect-ratio: 16/9 !important;*/
+    aspect-ratio: 2 / 1 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
   }
 
   #post-list-container.grid-mode :global(.post-card-content) {
     width: 100% !important;
+    height: auto !important;
+    flex-grow: 1 !important;
     padding: 1rem !important;
+  }
+
+  #post-list-container.grid-mode :global(.description) {
+    flex-grow: 0 !important;
+  }
+
+  #post-list-container.grid-mode :global(.post-card-bottom-tags) {
+    margin-top: 0.75rem !important;
   }
 
   #post-list-container.grid-mode :global(.no-cover .post-card-content) {

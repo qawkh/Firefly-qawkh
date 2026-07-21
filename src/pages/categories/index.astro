@@ -7,6 +7,14 @@ import { getCategoryList } from "@/utils/content-utils";
 
 const categories = await getCategoryList();
 const totalPosts = categories.reduce((sum, cat) => sum + cat.count, 0);
+const articlesEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ARTICLES_ENDPOINT || "/api/user/articles";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeArticlesUrl = /^https?:\/\//i.test(articlesEndpoint)
+	? articlesEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${articlesEndpoint.replace(/^\/+/, "")}`
+		: articlesEndpoint;
 ---
 
 <MainGridLayout title={i18n(I18nKey.categories)}>
@@ -16,12 +24,12 @@ const totalPosts = categories.reduce((sum, cat) => sum + cat.count, 0);
             {i18n(I18nKey.categories)}
         </div>
         <p class="text-30 text-sm">
-            {i18n(I18nKey.allCategories)} · {totalPosts} {i18n(I18nKey.postsCount)}
+            <span>{i18n(I18nKey.allCategories)} · </span><span data-runtime-categories-summary>{totalPosts} {i18n(I18nKey.postsCount)}</span>
         </p>
     </div>
 
     <!-- 分类卡片列表 -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4" data-runtime-categories-list>
         {
             categories.map((category, index) => (
                 <a
@@ -67,3 +75,88 @@ const totalPosts = categories.reduce((sum, cat) => sum + cat.count, 0);
         )
     }
 </MainGridLayout>
+
+<script is:inline define:vars={{ runtimeArticlesUrl, uncategorizedText: i18n(I18nKey.uncategorized), postsCountText: i18n(I18nKey.postsCount) }}>
+    (function initRuntimeCategoriesPage() {
+        function normalizeText(value) {
+            return typeof value === "string" ? value.trim() : "";
+        }
+
+        function escapeHtml(value) {
+            return normalizeText(value)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        }
+
+        function getRuntimeEndpoints(endpoint) {
+            if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+            const hostname = window.location.hostname;
+            if (hostname === "localhost" || hostname === "127.0.0.1") {
+                const localBackendEndpoint = "http://localhost:8090/api/user/articles";
+                return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+            }
+            return [endpoint];
+        }
+
+        async function fetchArticles() {
+            for (const endpoint of getRuntimeEndpoints(runtimeArticlesUrl)) {
+                try {
+                    const response = await fetch(endpoint, {
+                        headers: { Accept: "application/json" },
+                        cache: "no-store",
+                    });
+                    if (!response.ok) continue;
+                    const payload = await response.json();
+                    if (payload?.code === 200 && Array.isArray(payload.data)) return payload.data;
+                } catch (error) {
+                    console.warn("分类页运行时文章加载失败。", error);
+                }
+            }
+            return null;
+        }
+
+        function getCategoryCounts(articles) {
+            const countMap = new Map();
+            for (const article of articles) {
+                const category = normalizeText(article?.categoryName) || uncategorizedText;
+                countMap.set(category, (countMap.get(category) || 0) + 1);
+            }
+            return Array.from(countMap.entries())
+                .map(([name, count]) => ({ name, count }))
+                .sort((a, b) => b.count - a.count || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+        }
+
+        function getCategoryUrl(name) {
+            return name === uncategorizedText
+                ? "/archive/?uncategorized=true"
+                : `/archive/?category=${encodeURIComponent(name)}`;
+        }
+
+        function renderCategoryCard(category, index) {
+            return `<a href="${getCategoryUrl(category.name)}" class="card-base p-6 flex items-center gap-4 group onload-animation" style="animation-delay: calc(var(--content-delay) + ${index * 50}ms);"><div class="shrink-0 w-14 h-14 rounded-full bg-(--primary)/10 group-hover:bg-(--primary)/20 flex items-center justify-center transition-colors"><span class="text-3xl text-(--primary)" aria-hidden="true">#</span></div><div class="flex-1 min-w-0"><h2 class="text-lg font-bold text-90 truncate group-hover:text-(--primary) transition-colors" title="${escapeHtml(category.name)}">${escapeHtml(category.name)}</h2><p class="text-sm text-30 mt-1 group-hover:text-(--primary)/60 transition-colors">${category.count} ${postsCountText}</p></div><div class="shrink-0"><span class="text-2xl text-30 group-hover:text-(--primary) transition-colors" aria-hidden="true">&rsaquo;</span></div></a>`;
+        }
+
+        async function refreshCategories() {
+            const articles = await fetchArticles();
+            if (!articles) return;
+            const categories = getCategoryCounts(articles);
+            const list = document.querySelector("[data-runtime-categories-list]");
+            const summary = document.querySelector("[data-runtime-categories-summary]");
+            if (list) list.innerHTML = categories.map(renderCategoryCard).join("");
+            if (summary) {
+                const total = categories.reduce((sum, category) => sum + category.count, 0);
+                summary.textContent = `${total} ${postsCountText}`;
+            }
+        }
+
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", refreshCategories, { once: true });
+        } else {
+            refreshCategories();
+        }
+        document.addEventListener("astro:page-load", refreshCategories);
+    })();
+</script>

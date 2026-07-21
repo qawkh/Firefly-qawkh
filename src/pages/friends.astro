@@ -4,7 +4,6 @@ import Comment from "@components/comment/index.astro";
 import Markdown from "@components/common/Markdown.astro";
 import { Icon } from "astro-icon/components";
 import {
-	commentConfig,
 	friendsPageConfig,
 	getEnabledFriends,
 	siteConfig,
@@ -12,6 +11,11 @@ import {
 import I18nKey from "@/i18n/i18nKey";
 import { i18n } from "@/i18n/translation";
 import MainGridLayout from "@/layouts/MainGridLayout.astro";
+import {
+	canResolveCommentAtRuntime,
+	getResolvedCommentConfig,
+} from "@/utils/comment-settings";
+import { url } from "@/utils/url-utils";
 
 // 检查页面是否启用
 if (!siteConfig.pages.friends) {
@@ -27,19 +31,43 @@ if (!friendsPost) {
 const { Content } = await render(friendsPost);
 
 // 检查评论系统是否启用
-const isCommentEnabled =
-	commentConfig?.type &&
-	commentConfig.type !== "none" &&
+const resolvedCommentConfig = await getResolvedCommentConfig();
+const commentEnabled =
+	canResolveCommentAtRuntime(resolvedCommentConfig) &&
 	friendsPageConfig.showComment !== false;
 
 // 使用配置文件中的友链数据，按权重排序
 const items = getEnabledFriends();
 const allTags = [...new Set(items.flatMap((item) => item.tags || []))].sort();
+const friendLinksEndpoint =
+	import.meta.env.PUBLIC_QAWKH_FRIEND_LINKS_ENDPOINT ||
+	"/api/user/friend-links";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeFriendLinksUrl = /^https?:\/\//i.test(friendLinksEndpoint)
+	? friendLinksEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${friendLinksEndpoint.replace(/^\/+/, "")}`
+		: friendLinksEndpoint;
+const fallbackFriendLogoUrl = url("/favicon/favicon.ico");
+function getFriendSignaturePart(item: (typeof items)[number]) {
+	return encodeURIComponent(
+		JSON.stringify([
+			item.title,
+			item.desc,
+			item.imgurl,
+			item.siteurl,
+			item.tags || [],
+		]),
+	);
+}
+const renderedFriendSignature = items.map(getFriendSignaturePart).join("|");
 
 // 页面标题和描述
 const title = friendsPageConfig.title || i18n(I18nKey.friends);
 const description =
 	friendsPageConfig.description || i18n(I18nKey.friendsDescription);
+const allFilterText = i18n(I18nKey.all);
+const friendsEmptyText = i18n(I18nKey.friendsEmpty);
 ---
 
 <MainGridLayout title={title} description={description}>
@@ -71,7 +99,7 @@ const description =
       <!-- 搜索框 -->
       {
         items.length > 0 && (
-          <friend-filter class="mb-6">
+          <friend-filter class="mb-6" data-friend-filter>
             <div class="relative mb-3">
               <Icon is:inline
                 name="material-symbols:search"
@@ -84,7 +112,7 @@ const description =
                 class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-(--line-divider) bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:border-(--primary) focus:ring-1 focus:ring-(--primary) outline-none transition-all duration-200 text-sm"
               />
             </div>
-            <div class="flex flex-wrap gap-2">
+            <div class="flex flex-wrap gap-2" data-friend-tag-list>
               <button
                 data-tag="all"
                 class="category-pill px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-200"
@@ -105,7 +133,7 @@ const description =
         )
       }
 
-      <div class="friends-grid my-4">
+      <div class="friends-grid my-4" data-friends-grid data-rendered-friend-signature={renderedFriendSignature}>
         {
           items.length === 0 && (
             <div class="col-span-full flex flex-col items-center justify-center py-12 text-neutral-400 dark:text-neutral-500">
@@ -190,7 +218,7 @@ const description =
   )}
 
   <!-- 评论区 -->
-  {isCommentEnabled && (
+  {commentEnabled && (
     <div class="mt-4">
       <Comment post={friendsPost} customPath="/friends/" />
     </div>
@@ -277,6 +305,187 @@ const description =
       }
       customElements.define("friend-filter", FriendFilter);
     }
+  </script>
+
+  <script is:inline define:vars={{ runtimeFriendLinksUrl, fallbackFriendLogoUrl, allFilterText, friendsEmptyText }}>
+    (function initRuntimeFriendLinks() {
+      if (window.__fireflyRuntimeFriendLinksBound) {
+        if (typeof window.__fireflyLoadRuntimeFriendLinks === "function") {
+          window.__fireflyLoadRuntimeFriendLinks();
+        }
+        return;
+      }
+      window.__fireflyRuntimeFriendLinksBound = true;
+
+      function normalizeText(value) {
+        return typeof value === "string" ? value.trim() : "";
+      }
+
+      function escapeHtml(value) {
+        return normalizeText(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function escapeAttribute(value) {
+        return escapeHtml(value).replace(/`/g, "&#96;");
+      }
+
+      function getEndpoints(endpoint) {
+        if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+        const hostname = window.location.hostname;
+        if (hostname === "localhost" || hostname === "127.0.0.1") {
+          const localBackendEndpoint = "http://localhost:8090/api/user/friend-links";
+          return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+        }
+        return [endpoint];
+      }
+
+      function toHttpUrl(value, baseUrl) {
+        const text = normalizeText(value);
+        if (!text) return "";
+        try {
+          const parsed = new URL(text, baseUrl || window.location.href);
+          return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "";
+        } catch (_) {
+          return "";
+        }
+      }
+
+      function toImageUrl(value, baseUrl) {
+        return toHttpUrl(value, baseUrl) || fallbackFriendLogoUrl;
+      }
+
+      function normalizeTags(friend) {
+        const rawTags = Array.isArray(friend?.tags) ? friend.tags : [];
+        const category = normalizeText(friend?.categoryName || friend?.category || friend?.type);
+        return Array.from(
+          new Set(
+            rawTags
+              .map((tag) => normalizeText(typeof tag === "string" ? tag : tag?.name))
+              .concat(category)
+              .filter(Boolean),
+          ),
+        );
+      }
+
+      function normalizeFriend(friend, endpoint) {
+        const title = normalizeText(friend?.name || friend?.title);
+        const siteurl = toHttpUrl(friend?.linkUrl || friend?.siteurl || friend?.url, endpoint);
+        if (!title || !siteurl) return null;
+        return {
+          title,
+          desc: normalizeText(friend?.description || friend?.desc || friend?.summary),
+          imgurl: toImageUrl(friend?.logoImage || friend?.imgurl || friend?.avatar || friend?.logo, endpoint),
+          siteurl,
+          tags: normalizeTags(friend),
+        };
+      }
+
+      function getFriendSignature(friend) {
+        return encodeURIComponent(
+          JSON.stringify([friend.title, friend.desc, friend.imgurl, friend.siteurl, friend.tags || []]),
+        );
+      }
+
+      async function fetchFriendLinks() {
+        for (const endpoint of getEndpoints(runtimeFriendLinksUrl)) {
+          try {
+            const response = await fetch(endpoint, {
+              headers: { Accept: "application/json" },
+              cache: "no-store",
+            });
+            if (!response.ok) continue;
+            const payload = await response.json();
+            if (payload?.code !== 200 || !Array.isArray(payload.data)) continue;
+            return payload.data.map((friend) => normalizeFriend(friend, endpoint)).filter(Boolean);
+          } catch (error) {
+            console.warn("友链运行时加载失败。", error);
+          }
+        }
+        return null;
+      }
+
+      function renderTagFilters(tags) {
+        const filter = document.querySelector("[data-friend-filter]");
+        const tagList = document.querySelector("[data-friend-tag-list]");
+        if (!filter || !tagList) return;
+
+        filter.hidden = false;
+        filter.selectedTag = "all";
+        const input = filter.querySelector("[data-search]");
+        if (input) input.value = "";
+        tagList.innerHTML = [
+          `<button data-tag="all" class="category-pill px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-200" data-active>${escapeHtml(allFilterText)}</button>`,
+          ...tags.map((tag) => `<button data-tag="${escapeAttribute(tag)}" class="category-pill px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-200">${escapeHtml(tag)}</button>`),
+        ].join("");
+      }
+
+      function renderEmptyState(grid) {
+        grid.innerHTML = `<div class="col-span-full flex flex-col items-center justify-center py-12 text-neutral-400 dark:text-neutral-500"><div class="text-sm">${escapeHtml(friendsEmptyText)}</div></div>`;
+        const filter = document.querySelector("[data-friend-filter]");
+        if (filter) filter.hidden = true;
+        const searchEmpty = document.querySelector(".friends-empty");
+        if (searchEmpty) {
+          searchEmpty.classList.add("hidden");
+          searchEmpty.classList.remove("flex");
+        }
+      }
+
+      function createFriendCard(friend) {
+        const tags = friend.tags || [];
+        const tagsHtml = tags
+          .slice(0, 3)
+          .map((tag) => `<span class="text-[0.65rem] px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors duration-300">${escapeHtml(tag)}</span>`)
+          .join("");
+
+        return `<a href="${escapeAttribute(friend.siteurl)}" target="_blank" rel="noopener noreferrer" data-tags="${escapeAttribute(tags.join(","))}" class="friend-card group flex items-center gap-3 p-2.5 rounded-xl border border-(--line-divider) hover:border-(--primary) hover:bg-(--card-bg) transition-all duration-300 hover:shadow-lg relative overflow-hidden"><div class="absolute inset-0 bg-(--primary) opacity-0 group-hover:opacity-5 transition-opacity duration-300 pointer-events-none"></div><div class="relative w-16 h-16 shrink-0 rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 border border-black/5 dark:border-white/5 group-hover:scale-105 transition-transform duration-300"><img src="${escapeAttribute(friend.imgurl)}" alt="${escapeAttribute(friend.title)}" class="w-full h-full object-cover" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${escapeAttribute(fallbackFriendLogoUrl)}';"></div><div class="grow min-w-0 flex flex-col justify-center gap-0.5"><div class="flex items-center justify-between"><div class="font-bold text-base text-neutral-900 dark:text-neutral-100 group-hover:text-(--primary) transition-colors truncate pr-4">${escapeHtml(friend.title)}</div><span class="text-(--primary) text-lg opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300" aria-hidden="true">&nearr;</span></div><div class="text-sm text-neutral-500 dark:text-neutral-400 line-clamp-1" title="${escapeAttribute(friend.desc)}">${escapeHtml(friend.desc)}</div><div class="flex flex-wrap gap-1 mt-1">${tagsHtml}</div></div></a>`;
+      }
+
+      function renderFriends(friends) {
+        const grid = document.querySelector("[data-friends-grid]");
+        if (!grid) return;
+
+        if (!friends.length) {
+          grid.dataset.renderedFriendSignature = "";
+          renderEmptyState(grid);
+          return;
+        }
+
+        const signature = friends.map(getFriendSignature).join("|");
+        if (signature && signature === grid.dataset.renderedFriendSignature) return;
+
+        const tags = Array.from(new Set(friends.flatMap((friend) => friend.tags || []))).sort();
+        renderTagFilters(tags);
+        grid.innerHTML = friends.map(createFriendCard).join("");
+        grid.dataset.renderedFriendSignature = signature;
+
+        const searchEmpty = document.querySelector(".friends-empty");
+        if (searchEmpty) {
+          searchEmpty.classList.add("hidden");
+          searchEmpty.classList.remove("flex");
+        }
+      }
+
+      async function loadFriendLinks() {
+        const friends = await fetchFriendLinks();
+        if (!friends) return;
+        renderFriends(friends);
+      }
+
+      window.__fireflyLoadRuntimeFriendLinks = loadFriendLinks;
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", loadFriendLinks, { once: true });
+      } else {
+        loadFriendLinks();
+      }
+      document.addEventListener("astro:page-load", loadFriendLinks);
+      document.addEventListener("swup:contentReplaced", loadFriendLinks);
+    })();
   </script>
 
   <style is:global>

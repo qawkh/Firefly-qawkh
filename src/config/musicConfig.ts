@@ -8,8 +8,8 @@ export const musicPlayerConfig: MusicPlayerConfig = {
 	// 是否在侧边栏显示音乐播放器组件
 	showInSidebar: true,
 
-	// 使用方式："meting" 使用 Meting API，"local" 使用本地音乐列表
-	mode: "meting",
+	// 使用方式："remote" 使用 qawkh 后台音乐，"meting" 使用 Meting API，"local" 使用本地音乐列表
+	mode: "remote",
 
 	// 默认音量 (0-1)
 	volume: 0.7,
@@ -19,6 +19,13 @@ export const musicPlayerConfig: MusicPlayerConfig = {
 
 	// 是否显启用歌词
 	showLyrics: true,
+
+	// qawkh 后台音乐接口，刷新页面即可同步后台启用歌曲
+	remote: {
+		enable: true,
+		endpoint: "/api/user/music-songs",
+		fallbackMode: "meting",
+	},
 
 	// Meting API 配置
 	meting: {

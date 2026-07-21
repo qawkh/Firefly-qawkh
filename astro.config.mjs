@@ -295,6 +295,12 @@ export default defineConfig({
 	vite: {
 		plugins: [tailwindcss()],
 		server: {
+			proxy: {
+				"/api": {
+					target: process.env.API_PROXY_TARGET || "http://localhost:8090",
+					changeOrigin: true,
+				},
+			},
 			watch: {
 				ignored: ["**/package/**", "**/Firefly-docs/**"],
 			},
@@ -332,4 +338,3 @@ export default defineConfig({
 		},
 	},
 });
-

@@ -277,6 +277,9 @@ const bannerCarouselEffect =
 	backgroundWallpaper.common?.carousel?.transitionEffect ?? "fade";
 const hasMultipleImages =
 	backgroundImages.desktop.length > 1 || backgroundImages.mobile.length > 1;
+const backgroundApiEnabled = backgroundWallpaper.api?.enable ?? false;
+const backgroundApiEndpoint =
+	backgroundWallpaper.api?.endpoint ?? "/api/user/site-background-images";
 ---
 
 <Layout title={title} banner={banner} description={description} lang={lang} setOGTypeArticle={setOGTypeArticle} postSlug={postSlug}>
@@ -316,7 +319,7 @@ const hasMultipleImages =
 	`absolute z-10 w-full transition duration-700 overflow-hidden ${mobileNonHomeBannerClass}`,
 	(isOverlayMode && !isWallpaperSwitchable) ? 'wallpaper-overlay' : '',
 	(isFullscreenMode && !isWallpaperSwitchable) ? 'wallpaper-fullscreen' : '',
-]} style={
+]} data-background-api-enabled={backgroundApiEnabled ? "true" : "false"} data-background-api-endpoint={backgroundApiEndpoint} style={
 	isWallpaperSwitchable
 		? `top: -${BANNER_HEIGHT_EXTEND}vh; display: none; --overlay-opacity: ${backgroundWallpaper.overlay?.opacity ?? 0.8}; --overlay-z-index: ${backgroundWallpaper.overlay?.zIndex ?? -1}; --overlay-blur: ${backgroundWallpaper.overlay?.blur ?? 0}px;`
 		: isOverlayMode
@@ -401,6 +404,148 @@ const hasMultipleImages =
             </div>
         )}
     </div>
+    )}
+
+    {backgroundApiEnabled && (
+    <script is:inline data-swup-ignore-script>
+        (function initSiteBackgroundImages() {
+            if (window.__fireflySiteBackgroundLoaderBound) {
+                if (typeof window.__fireflyLoadSiteBackgroundImages === 'function') {
+                    window.__fireflyLoadSiteBackgroundImages();
+                }
+                return;
+            }
+
+            window.__fireflySiteBackgroundLoaderBound = true;
+            window.__fireflySiteBackgroundImagesCache = null;
+
+            function normalizeText(value) {
+                return typeof value === 'string' ? value.trim() : '';
+            }
+
+            function normalizeApiImages(payload) {
+                var rows = payload && Array.isArray(payload.data) ? payload.data : [];
+                return rows
+                    .slice()
+                    .sort(function(a, b) {
+                        return Number((a && a.sortOrder) || 0) - Number((b && b.sortOrder) || 0);
+                    })
+                    .map(function(item) {
+                        return normalizeText(item && item.imageUrl);
+                    })
+                    .filter(Boolean);
+            }
+
+            function getBackgroundImageEndpoints(endpoint) {
+                var hostname = window.location.hostname;
+                if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                    var localBackendEndpoint = 'http://localhost:8090/api/user/site-background-images';
+                    return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+                }
+                return [endpoint];
+            }
+
+            async function fetchBackgroundImages(endpoint) {
+                if (Array.isArray(window.__fireflySiteBackgroundImagesCache)) {
+                    return window.__fireflySiteBackgroundImagesCache;
+                }
+
+                var endpoints = getBackgroundImageEndpoints(endpoint);
+                var lastError = null;
+                for (var i = 0; i < endpoints.length; i++) {
+                    try {
+                        var response = await fetch(endpoints[i], {
+                            headers: { Accept: 'application/json' },
+                            cache: 'no-store',
+                        });
+                        if (!response.ok) continue;
+
+                        var payload = await response.json();
+                        if (!payload || payload.code !== 200) continue;
+
+                        var images = normalizeApiImages(payload);
+                        if (images.length) {
+                            window.__fireflySiteBackgroundImagesCache = images;
+                            return images;
+                        }
+                    } catch (error) {
+                        lastError = error;
+                    }
+                }
+
+                if (lastError) console.warn('背景图接口加载失败，继续使用本地兜底背景。', lastError);
+                return [];
+            }
+
+            function applyImageUrl(img, imageUrl) {
+                if (!img || !imageUrl || img.dataset.siteBackgroundUrl === imageUrl) return;
+
+                var fallbackUrl = img.currentSrc || img.src;
+                var wrapper = img.closest('.overflow-hidden');
+                var placeholder = wrapper ? wrapper.querySelector('.lqip-placeholder') : null;
+                var picture = img.closest('picture');
+                if (picture) {
+                    picture.querySelectorAll('source').forEach(function(source) {
+                        source.remove();
+                    });
+                }
+
+                img.dataset.siteBackgroundUrl = imageUrl;
+                img.removeAttribute('srcset');
+                img.removeAttribute('sizes');
+                img.style.opacity = '0';
+                if (placeholder) placeholder.classList.remove('loaded');
+
+                img.addEventListener('load', function() {
+                    img.style.opacity = '1';
+                    if (placeholder) placeholder.classList.add('loaded');
+                }, { once: true });
+
+                img.addEventListener('error', function() {
+                    if (fallbackUrl) img.src = fallbackUrl;
+                    img.style.opacity = '1';
+                    if (placeholder) placeholder.classList.add('loaded');
+                }, { once: true });
+
+                img.src = imageUrl;
+            }
+
+            function applyBackgroundImages(images) {
+                var container = document.getElementById('banner-images-container');
+                if (!container || !images.length) return;
+
+                var imgs = Array.prototype.slice.call(container.querySelectorAll('img'));
+                if (!imgs.length) return;
+
+                var startIndex = Math.floor(Math.random() * images.length);
+                imgs.forEach(function(img, index) {
+                    applyImageUrl(img, images[(startIndex + index) % images.length]);
+                });
+            }
+
+            async function loadSiteBackgroundImages() {
+                var wrapper = document.getElementById('wallpaper-wrapper');
+                if (!wrapper || wrapper.dataset.backgroundApiEnabled !== 'true') return;
+
+                var endpoint = wrapper.dataset.backgroundApiEndpoint || '/api/user/site-background-images';
+                var images = await fetchBackgroundImages(endpoint);
+                applyBackgroundImages(images);
+            }
+
+            window.__fireflyLoadSiteBackgroundImages = loadSiteBackgroundImages;
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', loadSiteBackgroundImages, { once: true });
+            } else {
+                loadSiteBackgroundImages();
+            }
+
+            document.addEventListener('astro:page-load', loadSiteBackgroundImages);
+            document.addEventListener('swup:contentReplaced', function() {
+                requestAnimationFrame(loadSiteBackgroundImages);
+            });
+        })();
+    </script>
     )}
 
     <!-- 壁纸轮播脚本（基于 CSS transition） -->
@@ -621,9 +766,14 @@ const hasMultipleImages =
     <div id="banner-overlay-container" class="absolute inset-0 z-20 pointer-events-none transition-swup-fade">    <!-- Home page text overlay - 始终渲染以便切换模式时控制显示 -->
     {homeTextEnable && (
         <div class={`banner-home-text-overlay absolute inset-0 z-20 flex items-center justify-center ${!showHomeText ? 'hidden' : ''}`}>
-            <div class="w-4/5 lg:w-3/4 text-center mb-0">
-                <div class="flex flex-col">
-                    {backgroundWallpaper.common?.homeText?.title && (
+			<div class="w-4/5 lg:w-3/4 text-center mb-0">
+				<div class="flex flex-col">
+					{backgroundWallpaper.common?.homeText?.eyebrow && (
+						<div class="banner-eyebrow text-white/85 font-bold uppercase tracking-[0.35em] mb-3 lg:mb-4">
+							{backgroundWallpaper.common.homeText.eyebrow}
+						</div>
+					)}
+					{backgroundWallpaper.common?.homeText?.title && (
                         <div class="banner-title font-bold text-white mb-2 lg:mb-4 leading-tight" style={{ '--banner-title-size': backgroundWallpaper.common.homeText.titleSize || "3rem" }}>
                             {backgroundWallpaper.common.homeText.title}
                         </div>
@@ -936,4 +1086,3 @@ const hasMultipleImages =
   }
 
 </style>
-

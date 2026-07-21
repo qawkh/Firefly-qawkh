@@ -1,7 +1,7 @@
 // 音乐播放器配置
 export type MusicPlayerConfig = {
-	// 使用方式：'meting' 或 'local'
-	mode?: "meting" | "local"; // "meting" 使用 Meting API，"local" 使用本地音乐列表
+	// 使用方式：'remote'、'meting' 或 'local'
+	mode?: "remote" | "meting" | "local"; // "remote" 使用 qawkh 后台音乐，"meting" 使用 Meting API，"local" 使用本地音乐列表
 
 	// 默认音量 (0-1)
 	volume?: number;
@@ -17,6 +17,18 @@ export type MusicPlayerConfig = {
 
 	// 是否在侧边栏显示音乐播放器组件
 	showInSidebar?: boolean;
+
+	// qawkh 后台音乐配置
+	remote?: {
+		// 是否启用 qawkh 后台音乐接口
+		enable?: boolean;
+
+		// 音乐接口地址
+		endpoint?: string;
+
+		// 后台接口失败或没有歌曲时使用的兜底来源
+		fallbackMode?: "meting" | "local" | "none";
+	};
 
 	// Meting API 配置
 	meting?: {

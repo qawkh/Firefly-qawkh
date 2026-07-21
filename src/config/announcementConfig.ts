@@ -20,4 +20,10 @@ export const announcementConfig: AnnouncementConfig = {
 		// 内部链接
 		external: false,
 	},
+
+	// qawkh 后台公告接口，刷新页面即可同步最新已发布公告
+	api: {
+		enable: true,
+		endpoint: "/api/user/announcements",
+	},
 };

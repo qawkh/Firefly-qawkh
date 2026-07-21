@@ -49,12 +49,22 @@ const i18nStrings = {
 };
 const tagsBaseUrl = url("/tags/");
 const categoriesBaseUrl = url("/categories/");
-const foldOnFilter = collapseAllButFirst;
+const articlesEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ARTICLES_ENDPOINT || "/api/user/articles";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeArticlesUrl = /^https?:\/\//i.test(articlesEndpoint)
+	? articlesEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${articlesEndpoint.replace(/^\/+/, "")}`
+		: articlesEndpoint;
+const runtimePostDetailUrl = url("/posts/remote/");
 ---
 
 <archive-panel
   class="card-base px-8 py-6"
-  data-fold={foldOnFilter ? "true" : "false"}
+  data-fold={foldArticle ? "true" : "false"}
+  data-runtime-articles-url={runtimeArticlesUrl}
+  data-runtime-post-detail-url={runtimePostDetailUrl}
 >
   {/* 筛选头部：默认隐藏，客户端在有筛选时填充并显示 */}
   <div id="archive-filter-header" class="mb-5 hidden">
@@ -173,7 +183,7 @@ const foldOnFilter = collapseAllButFirst;
       this.init();
     }
 
-    init() {
+    async init() {
       const params = new URLSearchParams(window.location.search);
       const tags = params.has("tag") ? params.getAll("tag") : [];
       const categories = params.has("category") ? params.getAll("category") : [];
@@ -181,12 +191,134 @@ const foldOnFilter = collapseAllButFirst;
 
       const hasFilter = tags.length > 0 || categories.length > 0 || !!uncategorized;
 
+      await this.renderRuntimeArticles();
+
       if (hasFilter) {
         this.applyFilter(tags, categories, !!uncategorized);
         this.updateBannerTitle(tags, categories, !!uncategorized);
       }
 
       this.bindYearToggles();
+    }
+
+    normalizeText(value) {
+      return typeof value === "string" ? value.trim() : "";
+    }
+
+    escapeHtml(value) {
+      return this.normalizeText(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    toDate(value) {
+      const text = this.normalizeText(value);
+      if (!text) return new Date();
+      const date = new Date(text);
+      return Number.isNaN(date.getTime()) ? new Date() : date;
+    }
+
+    formatDate(date) {
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${month}-${day}`;
+    }
+
+    getRuntimeEndpoints(endpoint) {
+      if (!endpoint) return [];
+      if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+      const hostname = window.location.hostname;
+      if (hostname === "localhost" || hostname === "127.0.0.1") {
+        const localBackendEndpoint = "http://localhost:8090/api/user/articles";
+        return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+      }
+      return [endpoint];
+    }
+
+    async fetchRuntimeArticles() {
+      const endpoint = this.dataset.runtimeArticlesUrl || "/api/user/articles";
+      for (const item of this.getRuntimeEndpoints(endpoint)) {
+        try {
+          const response = await fetch(item, {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          });
+          if (!response.ok) continue;
+          const payload = await response.json();
+          if (payload?.code === 200 && Array.isArray(payload.data)) return payload.data;
+        } catch (error) {
+          console.warn("归档运行时文章加载失败。", error);
+        }
+      }
+      return null;
+    }
+
+    mapRuntimeArticle(article) {
+      const id = this.normalizeText(String(article?.id ?? ""));
+      const title = this.normalizeText(article?.title);
+      if (!id || !title) return null;
+      const tags = Array.isArray(article?.tags)
+        ? article.tags.map((tag) => this.normalizeText(tag?.name || tag)).filter(Boolean)
+        : [];
+      return {
+        id,
+        title,
+        tags,
+        category: this.normalizeText(article?.categoryName),
+        published: this.toDate(article?.publishedAt || article?.updatedAt),
+      };
+    }
+
+    getRuntimePostHref(id) {
+      const detailUrl = this.dataset.runtimePostDetailUrl || "/posts/remote/";
+      return `${detailUrl}?id=${encodeURIComponent(id)}&path=${encodeURIComponent(`/posts/${id}`)}`;
+    }
+
+    createRuntimeYearBlock(group, index, shouldCollapse) {
+      const block = document.createElement("div");
+      block.className = "archive-year-block";
+      block.dataset.year = String(group.year);
+      block.dataset.count = String(group.posts.length);
+      const collapsed = shouldCollapse && index > 0;
+      block.innerHTML = `<button class="archive-year-toggle flex flex-row w-full items-center h-15 cursor-pointer rounded-lg hover:bg-(--btn-plain-bg-hover) transition-colors group/yr" aria-expanded="${collapsed ? "false" : "true"}"><div class="w-[15%] md:w-[10%] transition text-2xl font-bold text-right text-75 group-hover/yr:text-(--primary)">${group.year}</div><div class="w-[15%] md:w-[10%]"><div class="h-3 w-3 bg-none rounded-full outline-(--primary) mx-auto -outline-offset-2 z-50 outline-3"></div></div><div class="w-[70%] md:w-[80%] transition text-left text-50 flex items-center gap-2 group-hover/yr:text-(--primary)"><span class="archive-year-count">${group.posts.length}</span> <span class="archive-year-count-label">${group.posts.length === 1 ? i18nStrings.postCount : i18nStrings.postsCount}</span><span class="archive-arrow" style="${collapsed ? "transform: rotate(-90deg)" : ""}"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" /></svg></span></div></button><div class="archive-year-content" ${collapsed ? "hidden" : ""}>${group.posts.map((post) => this.createRuntimePostRow(post)).join("")}</div>`;
+      return block;
+    }
+
+    createRuntimePostRow(post) {
+      const categoryHtml = post.category
+        ? `<span class="shrink-0 inline-block text-xs font-medium px-1.5 py-0.5 rounded-sm bg-[oklch(0.95_0.025_var(--hue))] dark:bg-[oklch(0.25_0.025_var(--hue))] text-(--primary) group-hover:bg-(--primary) group-hover:text-white! transition-colors">${this.escapeHtml(post.category)}</span>`
+        : "";
+      const tagsText = post.tags.map((tag) => `#${tag}`).join(" ");
+      return `<a href="${this.getRuntimePostHref(post.id)}" aria-label="${this.escapeHtml(post.title)}" class="archive-post group btn-plain block! h-10 w-full rounded-lg hover:text-[initial]" data-tags="${this.escapeHtml(JSON.stringify(post.tags))}" data-category="${this.escapeHtml(post.category)}"><div class="flex flex-row justify-start items-center h-full"><div class="w-[15%] md:w-[10%] transition text-sm text-right text-50">${this.formatDate(post.published)}</div><div class="w-[15%] md:w-[10%] relative dash-line h-full flex items-center"><div class="transition-all mx-auto w-1 h-1 rounded-sm group-hover:h-5 bg-[oklch(0.5_0.05_var(--hue))] group-hover:bg-(--primary) outline-4 z-50 outline-(--card-bg) group-hover:outline-(--btn-plain-bg-hover) group-active:outline-(--btn-plain-bg-active)"></div></div><div class="w-[70%] md:max-w-[65%] md:w-[65%] text-left font-bold group-hover:translate-x-1 transition-all group-hover:text-(--primary) text-75 pr-8 whitespace-nowrap text-ellipsis overflow-hidden flex items-center gap-2">${categoryHtml}<span class="truncate">${this.escapeHtml(post.title)}</span></div><div class="hidden md:block md:w-[15%] text-left text-sm transition whitespace-nowrap text-ellipsis overflow-hidden text-30">${this.escapeHtml(tagsText)}</div></div></a>`;
+    }
+
+    async renderRuntimeArticles() {
+      const payload = await this.fetchRuntimeArticles();
+      if (!payload) return;
+      const posts = payload
+        .map((article) => this.mapRuntimeArticle(article))
+        .filter(Boolean)
+        .sort((a, b) => b.published.getTime() - a.published.getTime());
+      if (posts.length === 0) return;
+
+      const grouped = new Map();
+      for (const post of posts) {
+        const year = post.published.getFullYear();
+        if (!grouped.has(year)) grouped.set(year, []);
+        grouped.get(year).push(post);
+      }
+      const groups = Array.from(grouped.entries())
+        .map(([year, yearPosts]) => ({ year, posts: yearPosts }))
+        .sort((a, b) => b.year - a.year);
+      const shouldCollapse = this.dataset.fold === "true" && groups.length > 1;
+
+      this.querySelectorAll(".archive-year-block").forEach((block) => block.remove());
+      for (const [index, group] of groups.entries()) {
+        this.append(this.createRuntimeYearBlock(group, index, shouldCollapse));
+      }
     }
 
     // 按筛选条件隐藏不匹配的文章行，重算每年计数，隐藏空年份，重新折叠

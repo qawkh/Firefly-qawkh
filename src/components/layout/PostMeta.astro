@@ -1,8 +1,12 @@
 ---
 import { Icon } from "astro-icon/components";
-import { commentConfig } from "@/config";
 import I18nKey from "@/i18n/i18nKey";
 import { i18n } from "@/i18n/translation";
+import {
+	getResolvedCommentConfig,
+	isRemoteCommentSettingsEnabled,
+	shouldShowWalineVisitorCount,
+} from "@/utils/comment-settings";
 import { formatDateToYYYYMMDD } from "@/utils/date-utils";
 import { getCategoryUrl, getTagUrl } from "@/utils/url-utils";
 
@@ -56,6 +60,9 @@ const {
 const path = customPath || (id ? `/posts/${id}` : "");
 const visibleTags =
 	typeof maxTags === "number" ? tags?.slice(0, maxTags) : tags;
+const resolvedCommentConfig = await getResolvedCommentConfig();
+const hideWalineVisitorCountUntilRuntime =
+	resolvedCommentConfig.type === "none" && isRemoteCommentSettingsEnabled();
 ---
 
 <div
@@ -176,8 +183,8 @@ const visibleTags =
 
   {
     !isHome &&
-      commentConfig.type === "twikoo" &&
-      commentConfig.twikoo?.visitorCount &&
+      resolvedCommentConfig.type === "twikoo" &&
+      resolvedCommentConfig.twikoo?.visitorCount &&
       id && (
         <div class="flex items-center">
           <div class="meta-icon">
@@ -197,12 +204,17 @@ const visibleTags =
       )
   }
 
-  {
-    !isHome &&
-      commentConfig.type === "waline" &&
-      commentConfig.waline?.visitorCount &&
-      id && (
-        <div class="flex items-center">
+	{
+		!isHome &&
+			shouldShowWalineVisitorCount(resolvedCommentConfig) &&
+			id && (
+				<div
+					class:list={[
+						"flex items-center",
+						{ hidden: hideWalineVisitorCountUntilRuntime },
+					]}
+					data-waline-pageview-root
+				>
           <div class="meta-icon">
             <Icon
               is:inline
@@ -225,8 +237,8 @@ const visibleTags =
 
   {
     !isHome &&
-      commentConfig.type === "artalk" &&
-      commentConfig.artalk?.visitorCount &&
+      resolvedCommentConfig.type === "artalk" &&
+      resolvedCommentConfig.artalk?.visitorCount &&
       id && (
         <div class="flex items-center">
           <div class="meta-icon">

@@ -12,7 +12,7 @@ interface Props {
 }
 
 const { relatedPosts, currentPostId } = Astro.props;
-const apiUrl = url("/api/allPostMeta.json");
+const apiUrl = url("/internal/allPostMeta.json");
 const relatedIds = JSON.stringify(relatedPosts.map((p) => p.id));
 const noRelatedPostsText = i18n(I18nKey.noRelatedPosts);
 const noRandomPostsText = i18n(I18nKey.noRandomPosts);

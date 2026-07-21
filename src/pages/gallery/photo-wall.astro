@@ -1,0 +1,255 @@
+---
+import { Icon } from "astro-icon/components";
+import { galleryConfig, siteConfig } from "@/config";
+import I18nKey from "@/i18n/i18nKey";
+import { i18n } from "@/i18n/translation";
+import MainGridLayout from "@/layouts/MainGridLayout.astro";
+import { url } from "@/utils/url-utils";
+
+if (!siteConfig.pages.gallery) {
+	return Astro.redirect("/404/");
+}
+
+const title = i18n(I18nKey.gallery);
+const description = i18n(I18nKey.galleryDescription);
+const photoWallEndpoint =
+	import.meta.env.PUBLIC_QAWKH_PHOTO_WALL_ENDPOINT ||
+	"/api/user/photo-wall-categories";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const browserPhotoWallEndpoint = /^https?:\/\//i.test(photoWallEndpoint)
+	? photoWallEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${photoWallEndpoint.replace(/^\/+/, "")}`
+		: photoWallEndpoint;
+const galleryUrl = url("/gallery/");
+const columnWidth = galleryConfig.columnWidth || 240;
+---
+
+<MainGridLayout title={title} description={description}>
+	<section data-photo-wall-detail class="w-full">
+		<div class="w-full rounded-(--radius-large) overflow-hidden relative mb-4" data-photo-wall-cover-shell hidden>
+			<div class="relative w-full aspect-[3/1] min-h-[200px] max-h-[360px] overflow-hidden">
+				<div class="lqip-placeholder absolute inset-0 pointer-events-none" style="background: var(--muted)" aria-hidden="true" data-photo-wall-cover-placeholder></div>
+				<img
+					data-photo-wall-cover
+					src=""
+					alt=""
+					class="w-full h-full object-cover opacity-0 transition-opacity duration-500 ease-out"
+				/>
+				<div class="absolute inset-0 bg-linear-to-t from-black/70 via-black/30 to-transparent"></div>
+				<a
+					href={galleryUrl}
+					class="absolute top-4 left-4 inline-flex items-center gap-1.5 text-sm text-white/90 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-sm px-3 py-1.5 rounded-lg transition-colors"
+				>
+					<Icon is:inline name="material-symbols:arrow-back" class="text-base" />
+					{i18n(I18nKey.galleryBackToAlbums)}
+				</a>
+				<div class="absolute bottom-0 left-0 right-0 p-6">
+					<div class="text-2xl sm:text-3xl font-bold text-white mb-2 drop-shadow-lg" data-photo-wall-title>
+						{title}
+					</div>
+					<div class="flex items-center gap-4 text-sm text-white/80 flex-wrap" data-photo-wall-cover-meta></div>
+					<div class="flex flex-wrap gap-1.5 mt-2.5">
+						<span class="text-xs px-2 py-0.5 rounded bg-white/20 text-white/90 backdrop-blur-sm">照片墙</span>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="card-base px-6 py-4 mb-4" data-photo-wall-fallback-header>
+			<a
+				href={galleryUrl}
+				class="inline-flex items-center gap-1 text-sm text-(--primary) hover:underline mb-3"
+			>
+				<Icon is:inline name="material-symbols:arrow-back" class="text-base" />
+				{i18n(I18nKey.galleryBackToAlbums)}
+			</a>
+			<div class="text-2xl sm:text-3xl font-bold text-neutral-900 dark:text-neutral-100" data-photo-wall-fallback-title>
+				{title}
+			</div>
+			<div class="flex items-center gap-4 text-sm text-neutral-500 dark:text-neutral-400 mt-2 flex-wrap" data-photo-wall-fallback-meta></div>
+		</div>
+
+		<div class="w-full rounded-(--radius-large) overflow-hidden relative">
+			<div class="card-base z-10 px-6 py-6 relative w-full">
+				<div class="flex flex-col items-center justify-center py-16 text-neutral-400 dark:text-neutral-500" data-photo-wall-state>
+					<Icon is:inline name="material-symbols:photo-library" class="text-6xl mb-4 opacity-50" />
+					<p class="text-lg">正在加载照片墙...</p>
+				</div>
+				<div
+					class="gallery-masonry hidden"
+					style={`column-count: 2; column-gap: 0.75rem; --col-width: ${columnWidth}px;`}
+					data-photo-wall-grid
+				></div>
+			</div>
+		</div>
+	</section>
+
+	<script is:inline define:vars={{ browserPhotoWallEndpoint, galleryPhotosText: i18n(I18nKey.galleryPhotos), siteTitle: siteConfig.title || "Firefly" }}>
+		(function initRuntimePhotoWallDetail() {
+			const root = document.querySelector("[data-photo-wall-detail]");
+			if (!root) return;
+
+			function normalizeText(value) {
+				return typeof value === "string" ? value.trim() : "";
+			}
+
+			function escapeHtml(value) {
+				return normalizeText(value)
+					.replace(/&/g, "&amp;")
+					.replace(/</g, "&lt;")
+					.replace(/>/g, "&gt;")
+					.replace(/"/g, "&quot;")
+					.replace(/'/g, "&#39;");
+			}
+
+			function toDateText(value) {
+				const text = normalizeText(value);
+				if (!text) return "";
+				const dateText = text.includes("T") ? text.split("T")[0] : text.slice(0, 10);
+				return /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? dateText : "";
+			}
+
+			function getBaseEndpoints(endpoint) {
+				if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+				const hostname = window.location.hostname;
+				if (hostname === "localhost" || hostname === "127.0.0.1") {
+					const localBackendEndpoint = "http://localhost:8090/api/user/photo-wall-categories";
+					return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+				}
+				return [endpoint];
+			}
+
+			function getDetailEndpoints(id) {
+				return getBaseEndpoints(browserPhotoWallEndpoint).map(
+					(endpoint) => `${endpoint.replace(/\/$/, "")}/${encodeURIComponent(id)}`,
+				);
+			}
+
+			function setState(message) {
+				const state = root.querySelector("[data-photo-wall-state]");
+				const grid = root.querySelector("[data-photo-wall-grid]");
+				if (state) {
+					state.classList.remove("hidden");
+					state.classList.add("flex");
+					const text = state.querySelector("p");
+					if (text) text.textContent = message;
+				}
+				grid?.classList.add("hidden");
+			}
+
+			async function fetchDetail(id) {
+				for (const endpoint of getDetailEndpoints(id)) {
+					try {
+						const response = await fetch(endpoint, {
+							headers: { Accept: "application/json" },
+							cache: "no-store",
+						});
+						if (!response.ok) continue;
+						const payload = await response.json();
+						if (payload?.code !== 200 || !payload.data) continue;
+						return payload.data;
+					} catch (error) {
+						console.warn("照片墙详情运行时加载失败。", error);
+					}
+				}
+				return null;
+			}
+
+			function normalizePhotos(photos) {
+				return Array.isArray(photos)
+					? photos
+						.slice()
+						.sort((a, b) => {
+							const sortA = Number(a?.sortOrder ?? 0);
+							const sortB = Number(b?.sortOrder ?? 0);
+							if (sortA !== sortB) return sortA - sortB;
+							return Number(b?.id ?? 0) - Number(a?.id ?? 0);
+						})
+						.map((photo) => normalizeText(photo?.imageUrl))
+						.filter(Boolean)
+					: [];
+			}
+
+			function createPhotoCard(src, albumId, index) {
+				const card = document.createElement("div");
+				card.className = "gallery-photo-card break-inside-avoid mb-3";
+				card.innerHTML = `<div data-fancybox="gallery-photo-wall-${escapeHtml(albumId)}" data-src="${escapeHtml(src)}" data-type="image" class="block rounded-xl overflow-hidden relative group cursor-pointer"><div class="lqip-placeholder absolute inset-0 pointer-events-none" style="background: var(--muted)" aria-hidden="true"></div><img src="${escapeHtml(src)}" alt="Photo ${index + 1}" loading="lazy" decoding="async" class="w-full h-auto object-cover opacity-0 transition-all duration-500 ease-out group-hover:scale-105"></div>`;
+				const img = card.querySelector("img");
+				img?.addEventListener("load", () => {
+					img.style.opacity = "1";
+					img.previousElementSibling?.classList.add("loaded");
+				}, { once: true });
+				if (img?.complete) img.dispatchEvent(new Event("load"));
+				return card;
+			}
+
+			function setMeta(name, date, photoCount) {
+				const titleNodes = root.querySelectorAll("[data-photo-wall-title], [data-photo-wall-fallback-title]");
+				titleNodes.forEach((node) => {
+					node.textContent = name;
+				});
+				const metaHtml = `${date ? `<span class="inline-flex items-center gap-1">${escapeHtml(date)}</span>` : ""}<span class="inline-flex items-center gap-1">${photoCount} ${escapeHtml(galleryPhotosText)}</span>`;
+				root.querySelectorAll("[data-photo-wall-cover-meta], [data-photo-wall-fallback-meta]").forEach((node) => {
+					node.innerHTML = metaHtml;
+				});
+				document.title = `${name} - ${siteTitle}`;
+			}
+
+			function setCover(src, name) {
+				const shell = root.querySelector("[data-photo-wall-cover-shell]");
+				const fallback = root.querySelector("[data-photo-wall-fallback-header]");
+				const img = root.querySelector("[data-photo-wall-cover]");
+				const placeholder = root.querySelector("[data-photo-wall-cover-placeholder]");
+				if (!src || !img || !shell) return;
+				fallback?.setAttribute("hidden", "");
+				shell.removeAttribute("hidden");
+				img.alt = name;
+				img.addEventListener("load", () => {
+					img.style.opacity = "1";
+					placeholder?.classList.add("loaded");
+				}, { once: true });
+				img.src = src;
+			}
+
+			function renderDetail(detail, id) {
+				const name = normalizeText(detail?.name) || "照片墙";
+				const date = toDateText(detail?.updatedAt);
+				const photos = normalizePhotos(detail?.photos);
+				const photoCount = Math.max(photos.length, Number(detail?.photoCount) || 0);
+				setMeta(name, date, photoCount);
+				setCover(photos[0], name);
+
+				const state = root.querySelector("[data-photo-wall-state]");
+				const grid = root.querySelector("[data-photo-wall-grid]");
+				if (!photos.length || !grid) {
+					setState("暂无照片");
+					return;
+				}
+
+				state?.classList.add("hidden");
+				state?.classList.remove("flex");
+				grid.classList.remove("hidden");
+				grid.replaceChildren(...photos.map((photo, index) => createPhotoCard(photo, id, index)));
+				document.dispatchEvent(new Event("dynamic-gallery:ready"));
+			}
+
+			async function loadDetail() {
+				const id = normalizeText(new URL(window.location.href).searchParams.get("id"));
+				if (!id) {
+					setState("缺少照片墙分类 ID");
+					return;
+				}
+
+				const detail = await fetchDetail(id);
+				if (!detail) {
+					setState("照片墙加载失败或已被隐藏");
+					return;
+				}
+				renderDetail(detail, id);
+			}
+
+			loadDetail();
+		})();
+	</script>
+</MainGridLayout>

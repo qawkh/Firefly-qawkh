@@ -1,10 +1,23 @@
 ---
 
+import { createMarkdownProcessor } from "@astrojs/markdown-remark";
 import { getEntry, render } from "astro:content";
 import Markdown from "@components/common/Markdown.astro";
+import { profileConfig } from "@/config/profileConfig";
 import I18nKey from "@/i18n/i18nKey";
 import { i18n } from "@/i18n/translation";
 import MainGridLayout from "@/layouts/MainGridLayout.astro";
+
+type AboutApiPayload = {
+	profile?: {
+		longIntro?: string;
+	};
+};
+
+type ApiResult<T> = {
+	code?: number;
+	data?: T;
+};
 
 const aboutPost = await getEntry("spec", "about");
 
@@ -13,13 +26,234 @@ if (!aboutPost) {
 }
 
 const { Content } = await render(aboutPost);
+const remoteAboutEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ABOUT_ENDPOINT ||
+	profileConfig.api?.endpoint ||
+	"/api/user/about";
+const publicRemoteApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const serverRemoteApiBase =
+	import.meta.env.QAWKH_API_BASE ||
+	import.meta.env.PUBLIC_QAWKH_API_BASE ||
+	"http://localhost:8090";
+const aboutRemoteEnabled =
+	profileConfig.api?.enable !== false &&
+	import.meta.env.PUBLIC_QAWKH_ABOUT_ENABLED !== "false";
+const browserAboutEndpoint =
+	remoteAboutEndpoint.startsWith("http://") ||
+	remoteAboutEndpoint.startsWith("https://") ||
+	!publicRemoteApiBase
+		? remoteAboutEndpoint
+		: `${publicRemoteApiBase.replace(/\/$/, "")}/${remoteAboutEndpoint.replace(/^\/+/, "")}`;
+const aboutRuntimeConfigStr = JSON.stringify({
+	enabled: aboutRemoteEnabled,
+	endpoint: browserAboutEndpoint,
+});
+
+function toServerAboutEndpoint(endpoint: string): string {
+	if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+		return endpoint;
+	}
+	return `${serverRemoteApiBase.replace(/\/$/, "")}/${endpoint.replace(/^\/+/, "")}`;
+}
+
+async function fetchRemoteLongIntro(): Promise<string> {
+	if (!aboutRemoteEnabled) return "";
+
+	try {
+		const response = await fetch(toServerAboutEndpoint(remoteAboutEndpoint), {
+			headers: { Accept: "application/json" },
+		});
+
+		if (!response.ok) return "";
+
+		const payload = (await response.json()) as ApiResult<AboutApiPayload>;
+		const longIntro = payload.code === 200 ? payload.data?.profile?.longIntro : "";
+		return typeof longIntro === "string" ? longIntro.trim() : "";
+	} catch (error) {
+		console.warn("qawkh 关于页接口服务端加载失败，继续使用本地关于页。", error);
+		return "";
+	}
+}
+
+const remoteLongIntro = await fetchRemoteLongIntro();
+const remoteAboutHtml = remoteLongIntro
+	? (await (await createMarkdownProcessor()).render(remoteLongIntro)).code
+	: "";
 ---
 <MainGridLayout title={i18n(I18nKey.about)} description={i18n(I18nKey.about)}>
     <div class="flex w-full rounded-(--radius-large) overflow-hidden relative min-h-32">
         <div class="card-base z-10 px-9 py-6 relative w-full ">
-            <Markdown class="mt-2">
-                <Content />
+            <Markdown class="mt-2" data-qawkh-about-content>
+                {remoteAboutHtml ? <Fragment set:html={remoteAboutHtml} /> : <Content />}
             </Markdown>
         </div>
     </div>
 </MainGridLayout>
+
+<script is:inline define:vars={{ aboutRuntimeConfigStr }}>
+(function () {
+    var runtimeConfig = JSON.parse(aboutRuntimeConfigStr);
+    if (!runtimeConfig.enabled || !runtimeConfig.endpoint) return;
+
+    function normalizeText(value) {
+        return typeof value === 'string' ? value.trim() : '';
+    }
+
+    function escapeHtml(value) {
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function renderInline(text) {
+        return escapeHtml(text)
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+            .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+            .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+            .replace(/_([^_]+)_/g, '<em>$1</em>')
+            .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    }
+
+    function isBlockStart(line) {
+        return /^(#{1,6})\s+/.test(line)
+            || /^\s*([-*+])\s+/.test(line)
+            || /^\s*\d+\.\s+/.test(line)
+            || /^>\s?/.test(line)
+            || /^```/.test(line)
+            || /^-{3,}\s*$/.test(line);
+    }
+
+    function renderMarkdown(markdown) {
+        var lines = markdown.replace(/\r\n/g, '\n').split('\n');
+        var html = [];
+        var i = 0;
+        while (i < lines.length) {
+            var line = lines[i];
+            var trimmed = line.trim();
+            if (!trimmed) {
+                i++;
+                continue;
+            }
+
+            if (/^```/.test(trimmed)) {
+                var codeLines = [];
+                i++;
+                while (i < lines.length && !/^```/.test(lines[i].trim())) {
+                    codeLines.push(lines[i]);
+                    i++;
+                }
+                if (i < lines.length) i++;
+                html.push('<pre><code>' + escapeHtml(codeLines.join('\n')) + '</code></pre>');
+                continue;
+            }
+
+            var heading = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+            if (heading) {
+                var level = heading[1].length;
+                html.push('<h' + level + '>' + renderInline(heading[2]) + '</h' + level + '>');
+                i++;
+                continue;
+            }
+
+            if (/^-{3,}\s*$/.test(trimmed)) {
+                html.push('<hr>');
+                i++;
+                continue;
+            }
+
+            if (/^\s*([-*+])\s+/.test(line)) {
+                var items = [];
+                while (i < lines.length && /^\s*([-*+])\s+/.test(lines[i])) {
+                    items.push(lines[i].replace(/^\s*[-*+]\s+/, ''));
+                    i++;
+                }
+                html.push('<ul>' + items.map(function (item) { return '<li>' + renderInline(item) + '</li>'; }).join('') + '</ul>');
+                continue;
+            }
+
+            if (/^\s*\d+\.\s+/.test(line)) {
+                var orderedItems = [];
+                while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+                    orderedItems.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+                    i++;
+                }
+                html.push('<ol>' + orderedItems.map(function (item) { return '<li>' + renderInline(item) + '</li>'; }).join('') + '</ol>');
+                continue;
+            }
+
+            if (/^>\s?/.test(line)) {
+                var quoteLines = [];
+                while (i < lines.length && /^>\s?/.test(lines[i])) {
+                    quoteLines.push(lines[i].replace(/^>\s?/, ''));
+                    i++;
+                }
+                html.push('<blockquote><p>' + renderInline(quoteLines.join(' ')) + '</p></blockquote>');
+                continue;
+            }
+
+            var paragraphLines = [trimmed];
+            i++;
+            while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) {
+                paragraphLines.push(lines[i].trim());
+                i++;
+            }
+            html.push('<p>' + renderInline(paragraphLines.join(' ')) + '</p>');
+        }
+        return html.join('\n');
+    }
+
+    function getRuntimeEndpoints(endpoint) {
+        if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+        var hostname = window.location.hostname;
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            var localBackendEndpoint = 'http://localhost:8090/api/user/about';
+            return localBackendEndpoint === endpoint
+                ? [endpoint]
+                : [localBackendEndpoint, endpoint];
+        }
+        return [endpoint];
+    }
+
+    async function loadAboutFromEndpoint(endpoint) {
+        var response = await fetch(new URL(endpoint, window.location.origin).toString(), {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store'
+        });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        var payload = await response.json();
+        if (payload && payload.code === 200 && payload.data) return payload.data;
+        throw new Error('Invalid about payload');
+    }
+
+    function getQawkhAboutData(endpoint) {
+        if (!window.__qawkhAboutDataPromise) {
+            window.__qawkhAboutDataPromise = (async function () {
+                var errors = [];
+                var endpoints = getRuntimeEndpoints(endpoint);
+                for (var i = 0; i < endpoints.length; i++) {
+                    try {
+                        return await loadAboutFromEndpoint(endpoints[i]);
+                    } catch (error) {
+                        errors.push(error);
+                    }
+                }
+                if (errors.length > 0) console.warn('qawkh 个人中心接口加载失败，继续使用本地关于页。', errors[0]);
+                return null;
+            })();
+        }
+        return window.__qawkhAboutDataPromise;
+    }
+
+    getQawkhAboutData(runtimeConfig.endpoint).then(function (about) {
+        var longIntro = normalizeText(about?.profile?.longIntro);
+        if (!longIntro) return;
+        var content = document.querySelector('[data-qawkh-about-content]');
+        if (!content) return;
+        content.innerHTML = renderMarkdown(longIntro);
+    });
+})();
+</script>

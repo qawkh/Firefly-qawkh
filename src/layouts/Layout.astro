@@ -77,6 +77,23 @@ if (siteConfig.post.generateOgImages && postSlug) {
 
 const favicons: Favicon[] =
 	siteConfig.favicon.length > 0 ? siteConfig.favicon : defaultFavicons;
+const faviconAboutEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ABOUT_ENDPOINT ||
+	profileConfig.api?.endpoint ||
+	"/api/user/about";
+const publicRemoteApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const browserAboutEndpoint =
+	faviconAboutEndpoint.startsWith("http://") ||
+	faviconAboutEndpoint.startsWith("https://") ||
+	!publicRemoteApiBase
+		? faviconAboutEndpoint
+		: `${publicRemoteApiBase.replace(/\/$/, "")}/${faviconAboutEndpoint.replace(/^\/+/, "")}`;
+const faviconRuntimeConfigStr = JSON.stringify({
+	enabled:
+		profileConfig.api?.enable !== false &&
+		import.meta.env.PUBLIC_QAWKH_ABOUT_ENABLED !== "false",
+	endpoint: browserAboutEndpoint,
+});
 
 // const siteLang = siteConfig.lang.replace('_', '-')
 if (!lang) {
@@ -166,6 +183,80 @@ const siteLang = lang.replace("_", "-");
         />
       ))
     }
+
+    <script is:inline define:vars={{ faviconRuntimeConfigStr }}>
+      (function () {
+        var runtimeConfig = JSON.parse(faviconRuntimeConfigStr);
+        if (!runtimeConfig.enabled || !runtimeConfig.endpoint) return;
+
+        function normalizeText(value) {
+          return typeof value === 'string' ? value.trim() : '';
+        }
+
+        function getRuntimeEndpoints(endpoint) {
+          if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+          var hostname = window.location.hostname;
+          if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            var localBackendEndpoint = 'http://localhost:8090/api/user/about';
+            return localBackendEndpoint === endpoint
+              ? [endpoint]
+              : [localBackendEndpoint, endpoint];
+          }
+          return [endpoint];
+        }
+
+        async function loadAboutFromEndpoint(endpoint) {
+          var response = await fetch(new URL(endpoint, window.location.origin).toString(), {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store'
+          });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          var payload = await response.json();
+          if (payload && payload.code === 200 && payload.data) return payload.data;
+          throw new Error('Invalid about payload');
+        }
+
+        function getQawkhAboutData(endpoint) {
+          if (!window.__qawkhAboutDataPromise) {
+            window.__qawkhAboutDataPromise = (async function () {
+              var endpoints = getRuntimeEndpoints(endpoint);
+              for (var i = 0; i < endpoints.length; i++) {
+                try {
+                  return await loadAboutFromEndpoint(endpoints[i]);
+                } catch (_) {}
+              }
+              return null;
+            })();
+          }
+          return window.__qawkhAboutDataPromise;
+        }
+
+        function applyFavicon(avatarUrl) {
+          var avatar = normalizeText(avatarUrl);
+          if (!avatar) return;
+
+          var existingIcons = document.querySelectorAll('link[rel~="icon"]');
+          existingIcons.forEach(function (icon) {
+            icon.setAttribute('href', avatar);
+            icon.setAttribute('referrerpolicy', 'no-referrer');
+            icon.removeAttribute('sizes');
+            icon.removeAttribute('media');
+          });
+
+          if (existingIcons.length === 0) {
+            var link = document.createElement('link');
+            link.rel = 'icon';
+            link.href = avatar;
+            link.setAttribute('referrerpolicy', 'no-referrer');
+            document.head.appendChild(link);
+          }
+        }
+
+        getQawkhAboutData(runtimeConfig.endpoint).then(function (about) {
+          applyFavicon(about?.profile?.avatar);
+        });
+      })();
+    </script>
 
     <!-- 为特定域名的图片添加 referrerpolicy 以解决 403 问题 -->
     <!-- 注：静态图片（ImageWrapper 组件、Markdown 正文图）已在构建期加好 referrerpolicy；

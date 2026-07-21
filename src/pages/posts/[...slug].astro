@@ -1,4 +1,5 @@
 ---
+import type { CollectionEntry } from "astro:content";
 import { render } from "astro:content";
 import * as path from "node:path";
 import Comment from "@components/comment/index.astro";
@@ -9,7 +10,14 @@ import License from "@components/misc/License.astro";
 import I18nKey from "@i18n/i18nKey";
 import { i18n } from "@i18n/translation";
 import MainGridLayout from "@layouts/MainGridLayout.astro";
-import { getRelatedPosts, getSortedPosts } from "@utils/content-utils";
+import {
+	getRelatedPosts,
+	getSortedPosts,
+	hydratePostDetail,
+	isRemotePost,
+	renderRemotePost,
+	type PostForList,
+} from "@utils/content-utils";
 import {
 	getFileDirFromPath,
 	getPostUrlBySlug,
@@ -43,10 +51,18 @@ export async function getStaticPaths() {
 	});
 }
 
-const { entry } = Astro.props;
-const { Content, headings } = await render(entry);
-
-const { remarkPluginFrontmatter } = await render(entry);
+const initialEntry = Astro.props.entry as PostForList;
+const entry = await hydratePostDetail(initialEntry);
+const remotePost = isRemotePost(entry);
+const localRender = remotePost
+	? null
+	: await render(entry as CollectionEntry<"posts">);
+const remoteRender = remotePost ? await renderRemotePost(entry) : null;
+const Content = localRender?.Content;
+const headings = remoteRender?.headings ?? localRender?.headings ?? [];
+const remoteHtml = remoteRender?.html ?? "";
+const remarkPluginFrontmatter = remoteRender?.remarkPluginFrontmatter ??
+	localRender?.remarkPluginFrontmatter ?? { words: 0, minutes: 0, excerpt: "" };
 
 const bannerPostMeta = {
 	title: entry.data.title,
@@ -118,7 +134,7 @@ const jsonLd = {
 	keywords: entry.data.tags,
 	author: {
 		"@type": "Person",
-		name: profileConfig.name,
+		name: entry.data.author || profileConfig.name,
 		url: Astro.site,
 	},
 	datePublished: formatDateToYYYYMMDD(entry.data.published),
@@ -262,7 +278,7 @@ const relatedPosts = await getRelatedPosts(entry, 5);
       {entry.data.password ? (
         <EncryptedPost password={entry.data.password} slug={entry.id} hint={entry.data.passwordHint}>
           <Markdown class="mb-6 markdown-content onload-animation">
-            <Content />
+            {remotePost ? <Fragment set:html={remoteHtml} /> : Content && <Content />}
           </Markdown>
 
           {/* 打赏按钮 & 分享按钮 */}
@@ -350,7 +366,7 @@ const relatedPosts = await getRelatedPosts(entry, 5);
       ) : (
         <>
           <Markdown class="mb-6 markdown-content onload-animation">
-            <Content />
+            {remotePost ? <Fragment set:html={remoteHtml} /> : Content && <Content />}
           </Markdown>
 
           {/* 打赏按钮 & 分享按钮 */}
@@ -545,5 +561,7 @@ const relatedPosts = await getRelatedPosts(entry, 5);
   <RecommendedPost relatedPosts={relatedPosts} currentPostId={entry.id} />
 
   <!-- 评论 -->
-  {entry.data.comment && !entry.data.password && <Comment post={entry} />}
+  {entry.data.comment && !entry.data.password && (remotePost
+    ? <Comment customPath={`/posts/${entry.id}`} title={entry.data.title} />
+    : <Comment post={entry as CollectionEntry<"posts">} />)}
 </MainGridLayout>

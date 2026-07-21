@@ -50,8 +50,6 @@
   }
 
   code {
-    @apply bg-(--inline-code-bg) text-(--inline-code-color) px-1 py-0.5 rounded-md overflow-hidden;
-
     font-family:
       var(--font-jetbrains-mono),
       ui-monospace,
@@ -70,22 +68,10 @@
     &:after {
       content: none;
     }
+  }
 
-    counter-reset: line;
-
-    span.line {
-      &:before {
-        @apply text-white/25 mr-4 w-4 inline-block;
-        content: counter(line);
-        counter-increment: line;
-        direction: rtl;
-      }
-
-      &:last-child:empty,
-      &:last-child:has(> span:empty:only-child) {
-        display: none;
-      }
-    }
+  :not(pre) > code {
+    @apply bg-(--inline-code-bg) text-(--inline-code-color) px-1 py-0.5 rounded-md overflow-hidden;
   }
 
   .expressive-code {
@@ -213,4 +199,3 @@ body.wallpaper-transparent .custom-md {
     background-color: color-mix(in oklch, var(--btn-plain-bg-active) 68%, transparent);
   }
 }
-

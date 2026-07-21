@@ -6,13 +6,20 @@ export const profileConfig: ProfileConfig = {
 	// 1. public 目录（以 "/" 开头，不优化）："/assets/images/avatar.webp"
 	// 2. src 目录（不以 "/" 开头，自动优化但会增加构建时间，推荐）："assets/images/avatar.webp"
 	// 3. 远程 URL："https://example.com/avatar.jpg"
-	avatar: "assets/images/avatar.avif",
+	avatar:
+		"https://java-aierp.oss-cn-beijing.aliyuncs.com/articles/content/2026/06/04/a0d21ffd7140451592e87600cdf89fe0.jpg",
 
 	// 名字
 	name: "Firefly",
 
 	// 个人签名
 	bio: "Hello, I'm Firefly.",
+
+	// qawkh 个人中心接口，用于运行时同步头像等公开资料
+	api: {
+		enable: true,
+		endpoint: "/api/user/about",
+	},
 
 	// 链接配置
 	// 已经预装的图标集：fa7-brands，fa7-regular，fa7-solid，material-symbols，simple-icons
@@ -34,9 +41,9 @@ export const profileConfig: ProfileConfig = {
 			showName: false,
 		},
 		{
-			name: "Email",
+			name: "2929357588@qq.com",
 			icon: "fa7-solid:envelope",
-			url: "mailto:xiaye@msn.com",
+			url: "mailto:2929357588@qq.com",
 			showName: false,
 		},
 		{

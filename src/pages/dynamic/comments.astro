@@ -1,13 +1,18 @@
 ---
 import Comment from "@/components/comment/index.astro";
-import { commentConfig, dynamicConfig, siteConfig } from "@/config";
+import { dynamicConfig, siteConfig } from "@/config";
 import Layout from "@/layouts/Layout.astro";
+import {
+	canResolveCommentAtRuntime,
+	getResolvedCommentConfig,
+} from "@/utils/comment-settings";
+
+const resolvedCommentConfig = await getResolvedCommentConfig();
 
 if (
 	!siteConfig.pages.dynamic ||
 	dynamicConfig.showComment === false ||
-	!commentConfig.type ||
-	commentConfig.type === "none"
+	!canResolveCommentAtRuntime(resolvedCommentConfig)
 ) {
 	return Astro.redirect("/404/");
 }

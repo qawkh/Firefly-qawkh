@@ -9,6 +9,11 @@ export const backgroundWallpaper: BackgroundWallpaperConfig = {
 	switchable: true,
 	// 是否启用背景视频播放，配置后将在导航栏显示视频播放按钮
 	playerEnable: true,
+	// 是否优先从后端接口获取主屏幕背景图；失败时保留本地 src 作为兜底
+	api: {
+		enable: true,
+		endpoint: "/api/user/site-background-images",
+	},
 	/**
 	 * 背景图片配置
 	 * 图片路径支持三种格式：
@@ -80,26 +85,21 @@ export const backgroundWallpaper: BackgroundWallpaperConfig = {
 			enable: true,
 			// 是否允许用户通过控制面板切换横幅标题显示
 			switchable: true,
+			// 主页横幅小标题
+			eyebrow: "QAWKH BLOG",
 			// 主页横幅主标题
-			title: "Lovely firefly!",
+			title: "Qawkh の栖",
 			// 主页横幅主标题字体大小
-			titleSize: "3.8rem",
+			titleSize: "8rem",
 			// 主页横幅副标题
-			subtitle: [
-				"In Reddened Chrysalis, I Once Rest",
-				"From Shattered Sky, I Free Fall",
-				"Amidst Silenced Stars, I Deep Sleep",
-				"Upon Lighted Fyrefly, I Soon Gaze",
-				"From Undreamt Night, I Thence Shine",
-				"In Finalized Morrow, I Full Bloom",
-			],
+			subtitle: "在光影和文字之间，留一处适合停靠的小站。",
 			// 主页横幅副标题字体大小
 			subtitleSize: "1.5rem",
 			typewriter: {
 				// 是否启用打字机效果
 				// 打字机开启 → 循环显示所有副标题
 				// 打字机关闭 → 每次刷新随机显示一条副标题
-				enable: true,
+				enable: false,
 				// 打字速度（毫秒）
 				speed: 100,
 				// 删除速度（毫秒）

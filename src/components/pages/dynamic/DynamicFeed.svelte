@@ -14,13 +14,16 @@ type DynamicImage = {
 type DynamicData = {
 	id: string;
 	published: number;
+	text: string;
 	html: string;
 	images: DynamicImage[];
 	searchText: string;
+	authorName?: string;
 };
 
 interface Props {
 	source: string;
+	fallbackSource?: string;
 	itemsPerPage: number;
 	showComments: boolean;
 	emptyText: string;
@@ -32,6 +35,7 @@ interface Props {
 
 const {
 	source,
+	fallbackSource,
 	itemsPerPage,
 	showComments,
 	emptyText,
@@ -53,6 +57,14 @@ let searchInput: HTMLInputElement | null = null;
 let yearSelect: HTMLSelectElement | null = null;
 let restoreAnchorAfterRender = false;
 
+type QawkhMoment = {
+	id?: number | string;
+	contentText?: string;
+	imageUrls?: string[];
+	authorName?: string;
+	publishedAt?: string;
+};
+
 const pageEntries = $derived(
 	filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
 );
@@ -70,6 +82,117 @@ function updateUrl(clearHash = false) {
 	else current.searchParams.delete("page");
 	if (clearHash) current.hash = "";
 	history.replaceState(history.state, "", current);
+}
+
+function escapeHtml(value: string) {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/\"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
+
+function normalizeText(value: unknown) {
+	return typeof value === "string" ? value.trim() : "";
+}
+
+function textToHtml(markdown: string) {
+	return escapeHtml(markdown)
+		.replace(/\r\n/g, "\n")
+		.replace(/\n{2,}/g, "</p><p>")
+		.replace(/\n/g, "<br>")
+		.replace(/^(.+)$/s, "<p>$1</p>");
+}
+
+function toPublishedTimestamp(value: unknown) {
+	const text = normalizeText(value);
+	if (!text) return Date.now();
+	const localDateTime = /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/.exec(text);
+	if (localDateTime) {
+		const [, year, month, day, hour, minute, second = "0"] = localDateTime;
+		return Date.UTC(
+			Number(year),
+			Number(month) - 1,
+			Number(day),
+			Number(hour),
+			Number(minute),
+			Number(second),
+		);
+	}
+	const timestamp = Date.parse(text);
+	return Number.isNaN(timestamp) ? Date.now() : timestamp;
+}
+
+function mapRemoteMoment(moment: QawkhMoment): DynamicData | null {
+	const id = normalizeText(String(moment.id ?? ""));
+	if (!id) return null;
+	const text = normalizeText(moment.contentText);
+	const authorName = normalizeText(moment.authorName);
+	const images = Array.isArray(moment.imageUrls)
+		? moment.imageUrls
+			.map(normalizeText)
+			.filter(Boolean)
+			.map((src, index) => ({ alt: `Moment image ${index + 1}`, src }))
+		: [];
+	return {
+		id,
+		published: toPublishedTimestamp(moment.publishedAt),
+		text,
+		html: textToHtml(text),
+		images,
+		searchText: `${text} ${authorName}`.trim().toLocaleLowerCase(),
+		...(authorName ? { authorName } : {}),
+	};
+}
+
+function getRuntimeEndpoints(endpoint: string) {
+	if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+	const hostname = window.location.hostname;
+	if (hostname === "localhost" || hostname === "127.0.0.1") {
+		const localBackendEndpoint = "http://localhost:8090/api/user/moments";
+		return [withMomentParams(localBackendEndpoint)];
+	}
+	return [withMomentParams(endpoint)];
+}
+
+function withMomentParams(endpoint: string) {
+	const url = new URL(endpoint, window.location.origin);
+	if (!url.searchParams.has("pageNum")) url.searchParams.set("pageNum", "1");
+	if (!url.searchParams.has("pageSize")) url.searchParams.set("pageSize", "100");
+	return url.toString();
+}
+
+async function fetchDynamicSource(endpoint: string) {
+	const response = await fetch(endpoint, { headers: { Accept: "application/json" }, cache: "no-store" });
+	if (!response.ok) throw new Error(`HTTP ${response.status}`);
+	const data = await response.json();
+	if (Array.isArray(data)) return data as DynamicData[];
+	if (data?.code === 200 && Array.isArray(data.data?.records)) {
+		return data.data.records
+			.map(mapRemoteMoment)
+			.filter((entry: DynamicData | null): entry is DynamicData => Boolean(entry));
+	}
+	throw new Error("Invalid dynamics payload");
+}
+
+async function loadDynamicEntries() {
+	const errors: unknown[] = [];
+	for (const endpoint of getRuntimeEndpoints(source)) {
+		try {
+			return await fetchDynamicSource(endpoint);
+		} catch (error) {
+			errors.push(error);
+		}
+	}
+	if (fallbackSource) {
+		try {
+			return await fetchDynamicSource(fallbackSource);
+		} catch (error) {
+			errors.push(error);
+		}
+	}
+	throw errors[0] ?? new Error("Failed to load dynamics");
 }
 
 function applyFilters(resetPage = true) {
@@ -122,6 +245,7 @@ function createItem(entry: DynamicData) {
 	const author = root.querySelector<HTMLElement>("[data-dynamic-author]");
 	if (author) {
 		author.id = `${anchorId}-author`;
+		if (entry.authorName) author.textContent = entry.authorName;
 		root.querySelector("article")?.setAttribute("aria-labelledby", author.id);
 	}
 	root
@@ -239,9 +363,8 @@ onMount(() => {
 
 	const load = async () => {
 		try {
-			const response = await fetch(source);
-			if (!response.ok) throw new Error(`HTTP ${response.status}`);
-			entries = (await response.json()) as DynamicData[];
+			entries = await loadDynamicEntries();
+			document.querySelector("[data-dynamic-count-value]")?.replaceChildren(String(entries.length));
 			populateYears();
 			currentPage = pageFromUrl();
 			applyFilters(false);

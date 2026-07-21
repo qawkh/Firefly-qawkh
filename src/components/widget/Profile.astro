@@ -10,9 +10,27 @@ interface Props {
 }
 const { style } = Astro.props;
 const className = Astro.props.class;
+const profileId = `profile-${Math.random().toString(36).substring(2, 9)}`;
+const remoteAboutEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ABOUT_ENDPOINT ||
+	profileConfig.api?.endpoint ||
+	"/api/user/about";
+const publicRemoteApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const browserAboutEndpoint =
+	remoteAboutEndpoint.startsWith("http://") ||
+	remoteAboutEndpoint.startsWith("https://") ||
+	!publicRemoteApiBase
+		? remoteAboutEndpoint
+		: `${publicRemoteApiBase.replace(/\/$/, "")}/${remoteAboutEndpoint.replace(/^\/+/, "")}`;
+const profileRuntimeConfigStr = JSON.stringify({
+	enabled:
+		profileConfig.api?.enable !== false &&
+		import.meta.env.PUBLIC_QAWKH_ABOUT_ENABLED !== "false",
+	endpoint: browserAboutEndpoint,
+});
 ---
 
-<div class:list={["card-base", "p-3", className]} style={style}>
+<div class:list={["card-base", "p-3", className]} style={style} data-qawkh-profile-widget>
   <a
     aria-label="Go to About Page"
     href={url("/about/")}
@@ -29,6 +47,7 @@ const className = Astro.props.class;
       />
     </div>
     <ImageWrapper
+      id={`${profileId}-avatar`}
       src={profileConfig.avatar || ""}
       alt="Profile Image of the Author"
       class="mx-auto lg:w-full h-full lg:mt-0"
@@ -40,6 +59,7 @@ const className = Astro.props.class;
   </a>
   <div class="px-2">
     <div
+      id={`${profileId}-name`}
       class="font-bold text-xl text-center mb-1 dark:text-neutral-50 transition"
     >
       {profileConfig.name}
@@ -48,7 +68,7 @@ const className = Astro.props.class;
       class="h-1 w-5 bg-(--primary) mx-auto rounded-full mb-2 transition"
     >
     </div>
-    <div class="text-center text-neutral-400 mb-2.5 transition">
+    <div id={`${profileId}-bio`} class="text-center text-neutral-400 mb-2.5 transition">
       {profileConfig.bio}
     </div>
         <div class="flex flex-wrap gap-2 justify-center mb-1">
@@ -115,3 +135,105 @@ const className = Astro.props.class;
         </div>
   </div>
 </div>
+
+<script is:inline define:vars={{ profileRuntimeConfigStr, profileId }}>
+(function () {
+    var runtimeConfig = JSON.parse(profileRuntimeConfigStr);
+    if (!runtimeConfig.enabled || !runtimeConfig.endpoint) return;
+
+    function normalizeText(value) {
+        return typeof value === 'string' ? value.trim() : '';
+    }
+
+    function getRuntimeEndpoints(endpoint) {
+        if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+        var hostname = window.location.hostname;
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            var localBackendEndpoint = 'http://localhost:8090/api/user/about';
+            return localBackendEndpoint === endpoint
+                ? [endpoint]
+                : [localBackendEndpoint, endpoint];
+        }
+        return [endpoint];
+    }
+
+    async function loadAboutFromEndpoint(endpoint) {
+        var response = await fetch(new URL(endpoint, window.location.origin).toString(), {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store'
+        });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        var payload = await response.json();
+        if (payload && payload.code === 200 && payload.data) return payload.data;
+        throw new Error('Invalid about payload');
+    }
+
+    function getQawkhAboutData(endpoint) {
+        if (!window.__qawkhAboutDataPromise) {
+            window.__qawkhAboutDataPromise = (async function () {
+                var errors = [];
+                var endpoints = getRuntimeEndpoints(endpoint);
+                for (var i = 0; i < endpoints.length; i++) {
+                    try {
+                        return await loadAboutFromEndpoint(endpoints[i]);
+                    } catch (error) {
+                        errors.push(error);
+                    }
+                }
+                if (errors.length > 0) console.warn('qawkh 个人中心接口加载失败，继续使用本地个人资料。', errors[0]);
+                return null;
+            })();
+        }
+        return window.__qawkhAboutDataPromise;
+    }
+
+    function applyAvatar(avatarUrl) {
+        var avatar = normalizeText(avatarUrl);
+        if (!avatar) return;
+        var wrapper = document.getElementById(profileId + '-avatar');
+        if (!wrapper) return;
+        var picture = wrapper.querySelector('picture');
+        if (picture) {
+            picture.querySelectorAll('source').forEach(function (source) {
+                source.remove();
+            });
+        }
+        var img = wrapper.querySelector('img');
+        if (!img || img.dataset.qawkhAvatarUrl === avatar) return;
+
+        var placeholder = wrapper.querySelector('.lqip-placeholder');
+        var fallbackUrl = img.currentSrc || img.src;
+        img.dataset.qawkhAvatarUrl = avatar;
+        img.removeAttribute('srcset');
+        img.removeAttribute('sizes');
+        img.style.opacity = '0';
+        if (placeholder) placeholder.classList.remove('loaded');
+
+        img.addEventListener('load', function () {
+            img.style.opacity = '1';
+            if (placeholder) placeholder.classList.add('loaded');
+        }, { once: true });
+        img.addEventListener('error', function () {
+            if (fallbackUrl) img.src = fallbackUrl;
+            img.style.opacity = '1';
+            if (placeholder) placeholder.classList.add('loaded');
+        }, { once: true });
+        img.src = avatar;
+    }
+
+    function applyText(id, value) {
+        var text = normalizeText(value);
+        if (!text) return;
+        var node = document.getElementById(id);
+        if (!node || node.textContent === text) return;
+        node.textContent = text;
+    }
+
+    getQawkhAboutData(runtimeConfig.endpoint).then(function (about) {
+        var profile = about?.profile;
+        applyAvatar(profile?.avatar);
+        applyText(profileId + '-name', profile?.nickname);
+        applyText(profileId + '-bio', profile?.shortIntro);
+    });
+})();
+</script>

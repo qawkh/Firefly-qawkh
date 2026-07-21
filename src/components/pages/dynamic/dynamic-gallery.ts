@@ -1,10 +1,17 @@
-import * as FancyboxModule from "@fancyapps/ui";
-
 type GalleryImage = {
 	alt: string;
 	element: HTMLImageElement;
 	src: string;
 };
+
+let fancyboxModulePromise: Promise<typeof import("@fancyapps/ui")> | null = null;
+
+function loadFancyboxModule() {
+	if (!fancyboxModulePromise) {
+		fancyboxModulePromise = import("@fancyapps/ui");
+	}
+	return fancyboxModulePromise;
+}
 
 export function registerDynamicGallery(): void {
 	if (customElements.get("dynamic-gallery")) return;
@@ -41,7 +48,7 @@ export function registerDynamicGallery(): void {
 			grid.dataset.layout =
 				this.images.length === 1
 					? "single"
-					: this.images.length <= 4
+					: this.images.length === 2
 						? "two"
 						: "three";
 			this.images.slice(0, 6).forEach(({ element, alt }, index) => {
@@ -119,9 +126,9 @@ export function registerDynamicGallery(): void {
 			);
 			this.querySelector("[data-gallery-lightbox]")?.addEventListener(
 				"click",
-				(event) => {
+				async (event) => {
 					event.preventDefault();
-					const Fancybox = FancyboxModule.Fancybox;
+					const { Fancybox } = await loadFancyboxModule();
 					Fancybox.show(
 						this.images.map((image) => ({
 							src: image.src,

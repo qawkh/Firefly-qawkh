@@ -1,0 +1,261 @@
+---
+import { Icon } from "astro-icon/components";
+import WidgetLayout from "@/components/common/WidgetLayout.astro";
+import type { WidgetComponentConfig } from "@/types/config";
+
+interface Props {
+	class?: string;
+	style?: string;
+	widgetConfig?: WidgetComponentConfig;
+}
+
+const { class: className, style, widgetConfig } = Astro.props;
+const showTitle = widgetConfig?.showTitle !== false;
+const weatherEndpoint =
+	widgetConfig?.specificConfig?.weather?.endpoint ||
+	import.meta.env.PUBLIC_QAWKH_WEATHER_ENDPOINT ||
+	"/api/user/weather";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeWeatherUrl = /^https?:\/\//i.test(weatherEndpoint)
+	? weatherEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${weatherEndpoint.replace(/^\/+/, "")}`
+		: weatherEndpoint;
+---
+
+<WidgetLayout name="天气" showTitle={showTitle} id="weather-widget" class={className} style={style}>
+	<div data-weather-widget class="weather-widget min-h-34">
+		<div data-weather-loading class="flex items-center gap-3 rounded-xl bg-neutral-100/60 p-3 text-neutral-500 dark:bg-neutral-800/50 dark:text-neutral-400">
+			<div class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-(--btn-regular-bg) text-(--primary)">
+				<Icon is:inline name="svg-spinners:3-dots-fade" class="text-2xl" aria-hidden="true" />
+			</div>
+			<div class="min-w-0 flex-1">
+				<div class="h-4 w-24 animate-pulse rounded bg-black/10 dark:bg-white/10"></div>
+				<div class="mt-2 h-3 w-32 animate-pulse rounded bg-black/10 dark:bg-white/10"></div>
+			</div>
+		</div>
+
+		<div data-weather-error class="hidden rounded-xl bg-neutral-100/60 p-3 text-sm text-neutral-500 dark:bg-neutral-800/50 dark:text-neutral-400">
+			<div class="flex items-center gap-2 text-(--primary)">
+				<Icon is:inline name="material-symbols:cloud-off-outline-rounded" class="text-xl" aria-hidden="true" />
+				<span class="font-bold">天气暂不可用</span>
+			</div>
+			<p class="mt-1.5 text-xs leading-5">稍后会自动重试。</p>
+		</div>
+
+		<div data-weather-content class="hidden flex-col gap-3">
+			<div class="rounded-xl bg-linear-to-br from-(--btn-regular-bg) to-transparent p-3">
+				<div class="flex items-start justify-between gap-3">
+					<div class="min-w-0">
+						<div class="flex items-center gap-1.5 text-xs font-medium text-neutral-500 dark:text-neutral-400">
+							<Icon is:inline name="material-symbols:location-on-outline-rounded" class="text-base text-(--primary)" aria-hidden="true" />
+							<span data-weather-location class="truncate">--</span>
+						</div>
+						<div class="mt-2 flex items-end gap-2">
+							<span data-weather-temperature class="text-4xl font-bold leading-none text-neutral-900 dark:text-neutral-100">--</span>
+							<span class="pb-1 text-lg font-bold text-neutral-500 dark:text-neutral-400">°C</span>
+						</div>
+						<div class="mt-1 flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-300">
+							<span data-weather-text class="font-bold text-(--primary)">--</span>
+							<span data-weather-range class="text-xs text-neutral-500 dark:text-neutral-400">--</span>
+						</div>
+					</div>
+					<div class="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-white/70 text-(--primary) shadow-sm dark:bg-white/10">
+						<Icon is:inline name="material-symbols:partly-cloudy-day-rounded" class="text-4xl" aria-hidden="true" />
+					</div>
+				</div>
+			</div>
+
+			<div class="grid grid-cols-2 gap-2 text-xs">
+				<div class="rounded-lg bg-neutral-100/60 px-3 py-2 dark:bg-neutral-800/50">
+					<div class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400">
+						<Icon is:inline name="material-symbols:humidity-percentage-outline-rounded" class="text-base text-(--primary)" aria-hidden="true" />
+						<span>湿度</span>
+					</div>
+					<div data-weather-humidity class="mt-1 font-bold text-neutral-900 dark:text-neutral-100">--</div>
+				</div>
+				<div class="rounded-lg bg-neutral-100/60 px-3 py-2 dark:bg-neutral-800/50">
+					<div class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400">
+						<Icon is:inline name="material-symbols:air-rounded" class="text-base text-(--primary)" aria-hidden="true" />
+						<span>风力</span>
+					</div>
+					<div data-weather-wind class="mt-1 truncate font-bold text-neutral-900 dark:text-neutral-100">--</div>
+				</div>
+			</div>
+
+			<div data-weather-forecast class="flex flex-col gap-1.5"></div>
+			<div data-weather-updated class="text-right text-[0.7rem] text-neutral-400 dark:text-neutral-500"></div>
+		</div>
+	</div>
+</WidgetLayout>
+
+<script is:inline define:vars={{ runtimeWeatherUrl }}>
+	(function initWeatherWidget() {
+		if (window.__fireflyWeatherWidgetBound) {
+			if (typeof window.__fireflyLoadWeatherWidgets === "function") window.__fireflyLoadWeatherWidgets();
+			return;
+		}
+		window.__fireflyWeatherWidgetBound = true;
+
+		function normalizeText(value) {
+			return typeof value === "string" ? value.trim() : "";
+		}
+
+		function escapeHtml(value) {
+			return normalizeText(value)
+				.replace(/&/g, "&amp;")
+				.replace(/</g, "&lt;")
+				.replace(/>/g, "&gt;")
+				.replace(/"/g, "&quot;")
+				.replace(/'/g, "&#39;");
+		}
+
+		function getEndpoints(endpoint) {
+			if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+			const hostname = window.location.hostname;
+			if (hostname === "localhost" || hostname === "127.0.0.1") {
+				const localBackendEndpoint = "http://localhost:8090/api/user/weather";
+				return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+			}
+			return [endpoint];
+		}
+
+		function getBrowserLocation() {
+			if (window.__fireflyWeatherLocationPromise) return window.__fireflyWeatherLocationPromise;
+			window.__fireflyWeatherLocationPromise = new Promise((resolve) => {
+				if (!navigator.geolocation) {
+					resolve(null);
+					return;
+				}
+
+				navigator.geolocation.getCurrentPosition(
+					(position) => {
+						resolve({
+							latitude: position.coords.latitude,
+							longitude: position.coords.longitude,
+						});
+					},
+					() => resolve(null),
+					{
+						enableHighAccuracy: false,
+						timeout: 5000,
+						maximumAge: 10 * 60 * 1000,
+					},
+				);
+			});
+			return window.__fireflyWeatherLocationPromise;
+		}
+
+		function withLocationParams(endpoint, location) {
+			const targetUrl = new URL(endpoint, window.location.origin);
+			if (location) {
+				targetUrl.searchParams.set("latitude", String(location.latitude));
+				targetUrl.searchParams.set("longitude", String(location.longitude));
+			}
+			return targetUrl.toString();
+		}
+
+		function formatTemperature(value) {
+			return Number.isFinite(Number(value)) ? String(Math.round(Number(value))) : "--";
+		}
+
+		function formatRange(current) {
+			const low = formatTemperature(current?.lowTemperature);
+			const high = formatTemperature(current?.highTemperature);
+			if (low === "--" && high === "--") return "--";
+			return `${low}° / ${high}°`;
+		}
+
+		function formatReportTime(value) {
+			const text = normalizeText(value);
+			const match = text.match(/(\d{2}:\d{2})/);
+			return match ? `${match[1]} 更新` : "";
+		}
+
+		function setText(root, selector, value) {
+			const node = root.querySelector(selector);
+			if (node) node.textContent = value;
+		}
+
+		function setVisible(root, selector, visible, flex) {
+			const node = root.querySelector(selector);
+			if (!node) return;
+			node.classList.toggle("hidden", !visible);
+			if (flex) node.classList.toggle("flex", visible);
+		}
+
+		async function fetchWeather() {
+			const browserLocation = await getBrowserLocation();
+			for (const endpoint of getEndpoints(runtimeWeatherUrl)) {
+				try {
+					const response = await fetch(withLocationParams(endpoint, browserLocation), {
+						headers: { Accept: "application/json" },
+						cache: "no-store",
+					});
+					if (!response.ok) continue;
+					const payload = await response.json();
+					if (payload?.code === 200 && payload.data?.current) return payload.data;
+				} catch (_) {}
+			}
+			return null;
+		}
+
+		function renderForecast(root, forecast) {
+			const container = root.querySelector("[data-weather-forecast]");
+			if (!container) return;
+			const rows = Array.isArray(forecast) ? forecast.slice(0, 3) : [];
+			container.innerHTML = rows
+				.map((item) => {
+					const weather = normalizeText(item.dayWeather || item.nightWeather) || "--";
+					const day = normalizeText(item.week) || normalizeText(item.date).slice(5) || "--";
+					const low = formatTemperature(item.nightTemperature);
+					const high = formatTemperature(item.dayTemperature);
+					return `<div class="flex items-center justify-between rounded-lg bg-neutral-100/60 px-3 py-1.5 text-xs dark:bg-neutral-800/50"><span class="font-medium text-neutral-500 dark:text-neutral-400">${escapeHtml(day)}</span><span class="max-w-[45%] truncate text-neutral-700 dark:text-neutral-300">${escapeHtml(weather)}</span><span class="font-bold text-neutral-900 dark:text-neutral-100">${low}° / ${high}°</span></div>`;
+				})
+				.join("");
+		}
+
+		function renderWeather(root, data) {
+			const location = data.location || {};
+			const current = data.current || {};
+			const locationText = [location.cityName, location.districtName].map(normalizeText).filter(Boolean).join(" · ") || normalizeText(data.sourceLabel) || "天气";
+			setText(root, "[data-weather-location]", locationText);
+			setText(root, "[data-weather-temperature]", formatTemperature(current.temperature));
+			setText(root, "[data-weather-text]", normalizeText(current.weather) || "--");
+			setText(root, "[data-weather-range]", formatRange(current));
+			setText(root, "[data-weather-humidity]", Number.isFinite(Number(current.humidity)) ? `${current.humidity}%` : "--");
+			const wind = [current.windDirection, current.windPower ? `${current.windPower}级` : ""].map(normalizeText).filter(Boolean).join(" ");
+			setText(root, "[data-weather-wind]", wind || "--");
+			setText(root, "[data-weather-updated]", formatReportTime(current.reportTime));
+			renderForecast(root, data.forecast);
+			setVisible(root, "[data-weather-loading]", false);
+			setVisible(root, "[data-weather-error]", false);
+			setVisible(root, "[data-weather-content]", true, true);
+		}
+
+		function renderError(root) {
+			setVisible(root, "[data-weather-loading]", false);
+			setVisible(root, "[data-weather-content]", false, true);
+			setVisible(root, "[data-weather-error]", true);
+		}
+
+		async function loadWeatherWidgets() {
+			const widgets = Array.from(document.querySelectorAll("[data-weather-widget]"));
+			if (!widgets.length) return;
+			const data = await fetchWeather();
+			widgets.forEach((root) => {
+				if (data) renderWeather(root, data);
+				else renderError(root);
+			});
+		}
+
+		window.__fireflyLoadWeatherWidgets = loadWeatherWidgets;
+		if (document.readyState === "loading") {
+			document.addEventListener("DOMContentLoaded", loadWeatherWidgets, { once: true });
+		} else {
+			loadWeatherWidgets();
+		}
+		document.addEventListener("astro:page-load", loadWeatherWidgets);
+		document.addEventListener("swup:contentReplaced", loadWeatherWidgets);
+	})();
+</script>

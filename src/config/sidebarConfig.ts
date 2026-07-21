@@ -103,6 +103,16 @@ export const sidebarLayoutConfig: SidebarLayoutConfig = {
 	// 右侧边栏组件配置列表
 	rightComponents: [
 		{
+			// 组件类型：天气组件
+			type: "weather",
+			// 是否启用该组件
+			enable: true,
+			// 组件位置
+			position: "top",
+			// 是否在文章详情页显示
+			showOnPostPage: true,
+		},
+		{
 			// 组件类型：最新动态组件
 			type: "dynamic",
 			// 是否启用该组件
@@ -162,6 +172,23 @@ export const sidebarLayoutConfig: SidebarLayoutConfig = {
 				calendar: {
 					// 是否显示年度文章热力图
 					showHeatmap: true,
+				},
+			},
+		},
+		{
+			// 组件类型：近期特殊日期组件，显示在日历下方
+			type: "specialDates",
+			// 是否启用该组件
+			enable: true,
+			// 组件位置
+			position: "sticky",
+			// 是否在文章详情页显示
+			showOnPostPage: true,
+			// 组件专属配置
+			specificConfig: {
+				specialDates: {
+					// 显示的近期节日和特殊日期数量，最多 3 条
+					limit: 3,
 				},
 			},
 		},

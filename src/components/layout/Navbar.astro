@@ -114,9 +114,9 @@ if (isLocalSrcLogo) {
                     "flex flex-row items-center text-md",
                     siteConfig.navbar.followTheme ? "text-(--primary)" : "dark:text-white text-black"
                 ]} style="font-family: var(--font-navbar-title, inherit)">
-                                    {siteConfig.navbar.logo?.type === "icon" ? (
-                                        <Icon is:inline name={siteConfig.navbar.logo.value || "material-symbols:home-pin-outline"} class="text-[1.75rem] mb-1 mr-2" />
-                                    ) : siteConfig.navbar.logo?.type === "image" && logoImg ? (
+									{siteConfig.navbar.logo?.type === "icon" ? (
+										<Icon is:inline name={siteConfig.navbar.logo.value || "material-symbols:home-pin-outline"} class="text-[1.75rem] mb-1 mr-2" />
+									) : siteConfig.navbar.logo?.type === "image" && logoImg ? (
                                         <Picture
                                             src={logoImg}
                                             alt={siteConfig.navbar.logo.alt || siteConfig.title}
@@ -129,11 +129,9 @@ if (isLocalSrcLogo) {
                                         />
                                     ) : siteConfig.navbar.logo?.type === "image" ? (
                                         <img src={url(siteConfig.navbar.logo.value)} alt={siteConfig.navbar.logo.alt || siteConfig.title} class="h-7 w-7 mb-1 mr-2 object-contain" fetchpriority="high" />
-                                    ) : siteConfig.navbar.logo?.type === "url" ? (
-                                        <img src={siteConfig.navbar.logo.value} alt={siteConfig.navbar.logo.alt || siteConfig.title} class="h-7 w-7 mb-1 mr-2 object-contain" fetchpriority="high" />
-                                    ) : (
-                                        <Icon is:inline name="material-symbols:home-pin-outline" class="text-[1.75rem] mb-1 mr-2" />
-                                    )}
+									) : siteConfig.navbar.logo?.type === "url" ? (
+										<img src={siteConfig.navbar.logo.value} alt={siteConfig.navbar.logo.alt || siteConfig.title} class="h-7 w-7 mb-1 mr-2 object-contain" fetchpriority="high" />
+									) : null}
                     {navbarTitle}
                 </div>
             </a>

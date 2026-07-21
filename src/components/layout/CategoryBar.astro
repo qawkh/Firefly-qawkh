@@ -15,6 +15,15 @@ const categories = await getCategoryList();
 const totalPosts = (await getSortedPostsList()).length;
 const homeUrl = url("/");
 const archiveUrl = url("/archive/");
+const articlesEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ARTICLES_ENDPOINT || "/api/user/articles";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeArticlesUrl = /^https?:\/\//i.test(articlesEndpoint)
+	? articlesEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${articlesEndpoint.replace(/^\/+/, "")}`
+		: articlesEndpoint;
+const uncategorizedText = i18n(I18nKey.uncategorized);
 
 // 服务端计算初始高亮 pill（首屏无需等 JS）。
 // 查询串筛选（?category=/?tag=/?uncategorized）在静态页构建期不可知，
@@ -47,6 +56,8 @@ function initialActive(categoryName: string): {
   data-home-path={homeUrl}
   data-archive-path={archiveUrl}
   data-current-post-category={currentPostCategory || ""}
+  data-runtime-articles-url={runtimeArticlesUrl}
+  data-uncategorized-label={uncategorizedText}
 >
   <div class="category-bar-inner flex gap-2">
     <a
@@ -72,7 +83,7 @@ function initialActive(categoryName: string): {
     <div class="category-divider shrink-0"></div>
     <div class="scroll-area relative">
       <div class="scroll-fade scroll-fade-left" aria-hidden="true"></div>
-      <div class="category-scroll flex gap-2 overflow-x-auto">
+      <div class="category-scroll flex gap-2 overflow-x-auto" data-runtime-category-scroll>
         {
           categories.map((cat) => {
             const active = initialActive(cat.name);
@@ -221,6 +232,16 @@ function initialActive(categoryName: string): {
       return;
     }
 
+    if (hasUncategorized) {
+      const uncategorized = bar.dataset.uncategorizedLabel || "";
+      pills.forEach((pill) => {
+        if (pill.getAttribute("data-category-name") === uncategorized) {
+          pill.setAttribute("data-active", "");
+        }
+      });
+      return;
+    }
+
     if (isArchive && !hasTag && !hasUncategorized) {
       bar.querySelector<HTMLAnchorElement>('.category-pill[data-category-name="__archive__"]')
         ?.setAttribute("data-active", "");
@@ -326,6 +347,97 @@ function initialActive(categoryName: string): {
     });
   }
 
+  type RuntimeArticle = {
+    categoryName?: unknown;
+  };
+
+  type RuntimeCategory = {
+    name: string;
+    count: number;
+  };
+
+  function normalizeText(value: unknown): string {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  function escapeHtml(value: string): string {
+    return normalizeText(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function getRuntimeCategoryEndpoints(endpoint: string): string[] {
+    if (!endpoint) return [];
+    if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      const localBackendEndpoint = "http://localhost:8090/api/user/articles";
+      return localBackendEndpoint === endpoint ? [endpoint] : [localBackendEndpoint, endpoint];
+    }
+    return [endpoint];
+  }
+
+  async function fetchRuntimeCategoryArticles(bar: HTMLElement): Promise<RuntimeArticle[] | null> {
+    const endpoint = bar.dataset.runtimeArticlesUrl || "/api/user/articles";
+    for (const item of getRuntimeCategoryEndpoints(endpoint)) {
+      try {
+        const response = await fetch(item, {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!response.ok) continue;
+        const payload = await response.json();
+        if (payload?.code === 200 && Array.isArray(payload.data)) return payload.data;
+      } catch (error) {
+        console.warn("分类导航运行时文章加载失败。", error);
+      }
+    }
+    return null;
+  }
+
+  function getRuntimeCategories(bar: HTMLElement, articles: RuntimeArticle[]): RuntimeCategory[] {
+    const uncategorized = bar.dataset.uncategorizedLabel || "Uncategorized";
+    const countMap = new Map<string, number>();
+    for (const article of articles) {
+      const category = normalizeText(article.categoryName) || uncategorized;
+      countMap.set(category, (countMap.get(category) || 0) + 1);
+    }
+    return Array.from(countMap.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  }
+
+  function getRuntimeCategoryUrl(bar: HTMLElement, name: string): string {
+    const archivePath = bar.getAttribute("data-archive-path") || "/archive/";
+    const uncategorized = bar.dataset.uncategorizedLabel || "Uncategorized";
+    return name === uncategorized
+      ? `${archivePath}?uncategorized=true`
+      : `${archivePath}?category=${encodeURIComponent(name)}`;
+  }
+
+  function renderRuntimeCategoryPill(bar: HTMLElement, category: RuntimeCategory): string {
+    return `<a href="${getRuntimeCategoryUrl(bar, category.name)}" class="category-pill text-sm px-4 py-1.5 rounded-full whitespace-nowrap transition-colors duration-150 ease-out flex items-center justify-center" data-category-name="${escapeHtml(category.name)}">${escapeHtml(category.name)}<span class="pill-count">${category.count}</span></a>`;
+  }
+
+  async function refreshRuntimeCategoryBar() {
+    const bar = document.getElementById("category-bar");
+    if (!bar) return;
+    const articles = await fetchRuntimeCategoryArticles(bar);
+    if (!articles) return;
+    const categories = getRuntimeCategories(bar, articles);
+    const scroll = bar.querySelector<HTMLElement>("[data-runtime-category-scroll]");
+    if (!scroll || categories.length === 0) return;
+
+    scroll.innerHTML = categories.map((category) => renderRuntimeCategoryPill(bar, category)).join("");
+    const archiveCount = bar.querySelector<HTMLElement>('.category-pill[data-category-name="__archive__"] .pill-count');
+    if (archiveCount) archiveCount.textContent = String(articles.length);
+    updateCategoryBar(new URL(window.location.href), { scrollBehavior: "auto" });
+    updateScrollHint();
+  }
+
   function initScrollFeatures() {
     const bar = document.getElementById("category-bar");
     if (!bar) return;
@@ -388,10 +500,12 @@ function initialActive(categoryName: string): {
   }
 
   updateCategoryBar();
+  refreshRuntimeCategoryBar();
   initCategoryBarInteractions();
   initScrollFeatures();
   document.addEventListener("astro:page-load", () => {
     updateCategoryBar();
+    refreshRuntimeCategoryBar();
     initScrollFeatures();
   });
   document.addEventListener("swup:contentReplaced", () => {

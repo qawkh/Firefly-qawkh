@@ -2,6 +2,10 @@ export type BackgroundWallpaperConfig = {
 	mode: "banner" | "fullscreen" | "overlay" | "none"; // 壁纸模式：banner横幅模式、fullscreen全屏壁纸、overlay全屏透明覆盖模式或none纯色背景
 	switchable?: boolean; // 是否允许用户通过导航栏切换壁纸模式，默认true
 	playerEnable?: boolean; // 是否启用背景视频播放，默认false
+	api?: {
+		enable?: boolean; // 是否启用接口背景图
+		endpoint?: string; // 背景图接口地址，默认同源 /api/user/site-background-images
+	};
 	src:
 		| string
 		| string[]
@@ -17,6 +21,7 @@ export type BackgroundWallpaperConfig = {
 		homeText?: {
 			enable: boolean; // 是否在首页显示自定义文字（全局开关）
 			switchable?: boolean; // 是否允许用户通过控制面板切换横幅标题显示
+			eyebrow?: string; // 主标题上方的小标题
 			title?: string; // 主标题
 			subtitle?: string | string[]; // 副标题，支持单个字符串或字符串数组
 			titleSize?: string; // 主标题字体大小，如 "3.5rem"

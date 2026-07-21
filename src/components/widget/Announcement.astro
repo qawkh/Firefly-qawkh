@@ -16,19 +16,37 @@ interface Props {
 const { class: className, style, widgetConfig } = Astro.props;
 
 const showTitle = widgetConfig?.showTitle !== false;
+const widgetId = `announcement-${Math.random().toString(36).substring(2, 9)}`;
+const remoteAnnouncementsEndpoint =
+	import.meta.env.PUBLIC_QAWKH_ANNOUNCEMENTS_ENDPOINT ||
+	config.api?.endpoint ||
+	"/api/user/announcements";
+const publicRemoteApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const browserAnnouncementsEndpoint =
+	remoteAnnouncementsEndpoint.startsWith("http://") ||
+	remoteAnnouncementsEndpoint.startsWith("https://") ||
+	!publicRemoteApiBase
+		? remoteAnnouncementsEndpoint
+		: `${publicRemoteApiBase.replace(/\/$/, "")}/${remoteAnnouncementsEndpoint.replace(/^\/+/, "")}`;
+const announcementRuntimeConfigStr = JSON.stringify({
+	enabled:
+	config.api?.enable !== false &&
+		import.meta.env.PUBLIC_QAWKH_ANNOUNCEMENTS_ENABLED !== "false",
+	endpoint: browserAnnouncementsEndpoint,
+});
 ---
 
 <!-- 组件显示现在由sidebarLayoutConfig统一控制，无需检查config.enable -->
 <WidgetLayout
   name={config.title || i18n(I18nKey.announcement)}
   showTitle={showTitle}
-  id="announcement"
+  id={widgetId}
   class={className}
   style={style}
 >
   <div>
     <!-- 公告栏内容 -->
-    <div class="text-neutral-600 dark:text-neutral-300 leading-relaxed mb-3">
+    <div class="text-neutral-600 dark:text-neutral-300 leading-relaxed mb-3 whitespace-pre-line" data-announcement-content>
       {config.content}
     </div>
 
@@ -63,3 +81,89 @@ const showTitle = widgetConfig?.showTitle !== false;
     </div>
   </div>
 </WidgetLayout>
+
+<script is:inline define:vars={{ announcementRuntimeConfigStr, widgetId }}>
+(function () {
+    var runtimeConfig = JSON.parse(announcementRuntimeConfigStr);
+    if (!runtimeConfig.enabled || !runtimeConfig.endpoint) return;
+
+    function normalizeText(value) {
+        return typeof value === 'string' ? value.trim() : '';
+    }
+
+    function withAnnouncementParams(endpoint) {
+        var url = new URL(endpoint, window.location.origin);
+        if (!url.searchParams.has('pageNum')) url.searchParams.set('pageNum', '1');
+        if (!url.searchParams.has('pageSize')) url.searchParams.set('pageSize', '1');
+        return url.toString();
+    }
+
+    function getRuntimeEndpoints(endpoint) {
+        if (/^https?:\/\//i.test(endpoint)) return [withAnnouncementParams(endpoint)];
+        var hostname = window.location.hostname;
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            var localBackendEndpoint = 'http://localhost:8090/api/user/announcements';
+            return localBackendEndpoint === endpoint
+                ? [withAnnouncementParams(endpoint)]
+                : [withAnnouncementParams(localBackendEndpoint), withAnnouncementParams(endpoint)];
+        }
+        return [withAnnouncementParams(endpoint)];
+    }
+
+    function getRecords(payload) {
+        if (Array.isArray(payload)) return payload;
+        if (payload && payload.code === 200 && Array.isArray(payload.data?.records)) return payload.data.records;
+        if (payload && payload.code === 200 && Array.isArray(payload.data)) return payload.data;
+        return [];
+    }
+
+    function mapAnnouncement(item) {
+        var content = normalizeText(item?.contentText);
+        if (!content) return null;
+        return {
+            title: normalizeText(item?.title),
+            content: content
+        };
+    }
+
+    async function fetchRemoteAnnouncement(endpoint) {
+        var response = await fetch(endpoint, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        var payload = await response.json();
+        var records = getRecords(payload);
+        for (var i = 0; i < records.length; i++) {
+            var announcement = mapAnnouncement(records[i]);
+            if (announcement) return announcement;
+        }
+        return null;
+    }
+
+    async function loadRemoteAnnouncement() {
+        var errors = [];
+        var endpoints = getRuntimeEndpoints(runtimeConfig.endpoint);
+        for (var i = 0; i < endpoints.length; i++) {
+            try {
+                var announcement = await fetchRemoteAnnouncement(endpoints[i]);
+                if (announcement) return announcement;
+            } catch (error) {
+                errors.push(error);
+            }
+        }
+        if (errors.length > 0) console.warn('qawkh 公告接口加载失败，继续使用本地公告。', errors[0]);
+        return null;
+    }
+
+    loadRemoteAnnouncement().then(function (announcement) {
+        if (!announcement) return;
+        var wrapper = document.getElementById(widgetId);
+        if (!wrapper) return;
+        var content = wrapper.querySelector('[data-announcement-content]');
+        if (content) content.textContent = announcement.content;
+        if (announcement.title) {
+            var widget = wrapper.closest('widget-layout');
+            var title = widget?.querySelector('.widget-name');
+            if (title) title.textContent = announcement.title;
+        }
+    });
+})();
+</script>
