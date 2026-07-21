@@ -1,0 +1,599 @@
+---
+import { getEntry, render } from "astro:content";
+import Comment from "@components/comment/index.astro";
+import Markdown from "@components/common/Markdown.astro";
+import { Icon } from "astro-icon/components";
+import {
+	bookmarksPageConfig,
+	getEnabledBookmarkGroups,
+	siteConfig,
+} from "@/config";
+import MainGridLayout from "@/layouts/MainGridLayout.astro";
+import {
+	canResolveCommentAtRuntime,
+	getResolvedCommentConfig,
+} from "@/utils/comment-settings";
+import { url } from "@/utils/url-utils";
+
+if (!siteConfig.pages.bookmarks) {
+	return Astro.redirect("/404/");
+}
+
+const bookmarksPost = await getEntry("spec", "bookmarks");
+let Content: Awaited<ReturnType<typeof render>>["Content"] | null = null;
+
+if (bookmarksPost) {
+	const rendered = await render(bookmarksPost);
+	Content = rendered.Content;
+}
+
+const resolvedCommentConfig = await getResolvedCommentConfig();
+const commentEnabled =
+	Boolean(bookmarksPost) &&
+	canResolveCommentAtRuntime(resolvedCommentConfig) &&
+	bookmarksPageConfig.showComment === true;
+
+const groups = getEnabledBookmarkGroups();
+const allCategories = groups.map((group) => ({
+	name: group.title,
+	slug: group.slug || group.title,
+}));
+const bookmarksEndpoint =
+	import.meta.env.PUBLIC_QAWKH_BOOKMARKS_ENDPOINT || "/api/user/bookmarks";
+const publicApiBase = import.meta.env.PUBLIC_QAWKH_API_BASE || "";
+const runtimeBookmarksUrl = /^https?:\/\//i.test(bookmarksEndpoint)
+	? bookmarksEndpoint
+	: publicApiBase
+		? `${publicApiBase.replace(/\/$/, "")}/${bookmarksEndpoint.replace(/^\/+/, "")}`
+		: bookmarksEndpoint;
+const fallbackBookmarkIconUrl = url("/favicon/favicon.ico");
+
+function getBookmarkSignaturePart(group: (typeof groups)[number]) {
+	return encodeURIComponent(
+		JSON.stringify([
+			group.title,
+			group.slug,
+			group.items.map((item) => [
+				item.title,
+				item.desc,
+				item.imgurl,
+				item.siteurl,
+				item.openInNewWindow,
+				item.tags || [],
+			]),
+		]),
+	);
+}
+
+const renderedBookmarkSignature = groups.map(getBookmarkSignaturePart).join("|");
+const title = bookmarksPageConfig.title || "收藏夹";
+const description =
+	bookmarksPageConfig.description || "常用网站、工具和内容入口。";
+const allFilterText = "全部";
+const bookmarksEmptyText = "暂无收藏";
+const searchNoResultsText = "没有找到匹配的收藏";
+---
+
+<MainGridLayout title={title} description={description}>
+	<div
+		class="flex w-full rounded-(--radius-large) overflow-hidden relative min-h-32"
+	>
+		<div class="card-base z-10 px-9 py-6 relative w-full">
+			<div class="mb-4">
+				<div class="flex items-center gap-3 mb-3">
+					<div
+						class="h-8 w-8 rounded-lg bg-(--primary) flex items-center justify-center text-white dark:text-black/70"
+					>
+						<Icon
+							is:inline
+							name="material-symbols:bookmarks-rounded"
+							class="text-[1.5rem]"
+						/>
+					</div>
+					<div class="text-3xl font-bold text-neutral-900 dark:text-neutral-100">
+						{title}
+					</div>
+				</div>
+				{
+					description && (
+						<p class="text-base text-neutral-600 dark:text-neutral-400 leading-relaxed mb-4">
+							{description}
+						</p>
+					)
+				}
+			</div>
+
+			<bookmark-filter
+				class:list={["mb-6", groups.length === 0 && "hidden"]}
+				data-bookmark-filter
+			>
+				<div class="relative mb-3">
+					<Icon
+						is:inline
+						name="material-symbols:search"
+						class="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500 text-lg pointer-events-none"
+					/>
+					<input
+						type="text"
+						data-search
+						placeholder="搜索收藏..."
+						class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-(--line-divider) bg-transparent text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:border-(--primary) focus:ring-1 focus:ring-(--primary) outline-none transition-all duration-200 text-sm"
+					/>
+				</div>
+				<div class="flex flex-wrap gap-2" data-bookmark-category-list>
+					<button
+						data-category="all"
+						class="category-pill px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-200"
+						data-active
+					>
+						{allFilterText}
+					</button>
+					{
+						allCategories.map((category) => (
+							<button
+								data-category={category.slug}
+								class="category-pill px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-200"
+							>
+								{category.name}
+							</button>
+						))
+					}
+				</div>
+			</bookmark-filter>
+
+			<div
+				class="bookmarks-list my-4 space-y-6"
+				data-bookmark-groups
+				data-rendered-bookmark-signature={renderedBookmarkSignature}
+			>
+				{
+					groups.length === 0 && (
+						<div class="flex flex-col items-center justify-center py-12 text-neutral-400 dark:text-neutral-500">
+							<Icon
+								is:inline
+								name="material-symbols:bookmark-remove-outline-rounded"
+								class="text-4xl mb-3"
+							/>
+							<div class="text-sm">{bookmarksEmptyText}</div>
+						</div>
+					)
+				}
+				{
+					groups.map((group) => {
+						const categorySlug = group.slug || group.title;
+
+						return (
+							<section
+								class="bookmark-category-section"
+								data-category={categorySlug}
+							>
+								<div class="flex items-center justify-between gap-3 mb-3">
+									<div class="flex items-center gap-2 min-w-0">
+										<Icon
+											is:inline
+											name="material-symbols:folder-open-rounded"
+											class="text-(--primary) text-xl shrink-0"
+										/>
+										<h2 class="font-bold text-lg text-neutral-900 dark:text-neutral-100 truncate">
+											{group.title}
+										</h2>
+									</div>
+									<span class="shrink-0 text-xs px-2 py-1 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
+										{group.items.length} 个收藏
+									</span>
+								</div>
+								<div class="bookmarks-grid">
+									{group.items.map((item) => (
+										<a
+											href={item.siteurl}
+											target={item.openInNewWindow === false ? undefined : "_blank"}
+											rel={
+												item.openInNewWindow === false
+													? undefined
+													: "noopener noreferrer"
+											}
+											data-category={categorySlug}
+											data-tags={[group.title, ...(item.tags || [])].join(",")}
+											class="bookmark-card group flex items-center gap-3 p-2.5 rounded-xl border border-(--line-divider) hover:border-(--primary) hover:bg-(--card-bg) transition-all duration-300 hover:shadow-lg relative overflow-hidden"
+										>
+											<div class="absolute inset-0 bg-(--primary) opacity-0 group-hover:opacity-5 transition-opacity duration-300 pointer-events-none" />
+											<div class="relative w-16 h-16 shrink-0 rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 border border-black/5 dark:border-white/5 group-hover:scale-105 transition-transform duration-300">
+												<img
+													src={item.imgurl || fallbackBookmarkIconUrl}
+													alt={item.title}
+													class="w-full h-full object-cover"
+													loading="lazy"
+													decoding="async"
+												/>
+											</div>
+											<div class="grow min-w-0 flex flex-col justify-center gap-0.5">
+												<div class="flex items-center justify-between">
+													<div class="font-bold text-base text-neutral-900 dark:text-neutral-100 group-hover:text-(--primary) transition-colors truncate pr-4">
+														{item.title}
+													</div>
+													<Icon
+														is:inline
+														name="material-symbols:arrow-outward-rounded"
+														class="text-(--primary) text-lg opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300"
+													/>
+												</div>
+												<div
+													class="text-sm text-neutral-500 dark:text-neutral-400 line-clamp-1"
+													title={item.desc}
+												>
+													{item.desc}
+												</div>
+												<div class="flex flex-wrap gap-1 mt-1">
+													<span class="text-[0.65rem] px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors duration-300">
+														{group.title}
+													</span>
+													{item.tags &&
+														item.tags
+															.slice(0, 2)
+															.map((tag) => (
+																<span class="text-[0.65rem] px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors duration-300">
+																	{tag}
+																</span>
+															))}
+												</div>
+											</div>
+										</a>
+									))}
+								</div>
+							</section>
+						);
+					})
+				}
+			</div>
+
+			<div class="bookmarks-empty hidden flex-col items-center justify-center py-12 text-neutral-400 dark:text-neutral-500">
+				<Icon
+					is:inline
+					name="material-symbols:search-off-rounded"
+					class="text-4xl mb-3"
+				/>
+				<div class="text-sm">{searchNoResultsText}</div>
+			</div>
+		</div>
+	</div>
+
+	{
+		bookmarksPageConfig.showCustomContent !== false && Content && (
+			<div class="mt-4 card-base z-10 px-9 py-6 relative w-full">
+				<Markdown class="">
+					<Content />
+				</Markdown>
+			</div>
+		)
+	}
+
+	{
+		commentEnabled && bookmarksPost && (
+			<div class="mt-4">
+				<Comment post={bookmarksPost} customPath="/bookmarks/" />
+			</div>
+		)
+	}
+
+	<script slot="head" is:inline>
+		if (!customElements.get("bookmark-filter")) {
+			class BookmarkFilter extends HTMLElement {
+				selectedCategory = "all";
+
+				connectedCallback() {
+					this.addEventListener("click", this.handleClick);
+					const input = this.querySelector("[data-search]");
+					if (input) {
+						input.addEventListener("input", () => this.applyFilters());
+					}
+				}
+
+				disconnectedCallback() {
+					this.removeEventListener("click", this.handleClick);
+				}
+
+				handleClick(e) {
+					const target = e.target;
+					const button = target.closest("button");
+					if (!button) return;
+
+					this.selectedCategory = button.dataset.category;
+					const filters = this.querySelectorAll("button");
+					filters.forEach((filter) => filter.removeAttribute("data-active"));
+					button.setAttribute("data-active", "");
+
+					this.applyFilters();
+				}
+
+				applyFilters() {
+					const container = this.closest(".card-base");
+					if (!container) return;
+
+					const input = this.querySelector("[data-search]");
+					const query = (input?.value || "").toLowerCase().trim();
+					const sections = container.querySelectorAll(".bookmark-category-section");
+					let hasVisible = false;
+
+					sections.forEach((section) => {
+						let sectionHasVisible = false;
+						const cards = section.querySelectorAll(".bookmark-card");
+
+						cards.forEach((card) => {
+							const cardEl = card;
+							const tags = (cardEl.dataset.tags || "").split(",");
+							const category = cardEl.dataset.category || "";
+							const name = (
+								cardEl.querySelector(".font-bold")?.textContent || ""
+							).toLowerCase();
+							const desc = (
+								cardEl.querySelector(".line-clamp-1")?.textContent || ""
+							).toLowerCase();
+
+							const categoryMatch =
+								this.selectedCategory === "all" || category === this.selectedCategory;
+							const searchMatch =
+								!query ||
+								name.includes(query) ||
+								desc.includes(query) ||
+								category.toLowerCase().includes(query) ||
+								tags.some((tag) => tag.toLowerCase().includes(query));
+
+							if (categoryMatch && searchMatch) {
+								cardEl.style.display = "";
+								cardEl.classList.add("animate-fade-in-up");
+								sectionHasVisible = true;
+								hasVisible = true;
+							} else {
+								cardEl.style.display = "none";
+								cardEl.classList.remove("animate-fade-in-up");
+							}
+						});
+
+						section.hidden = !sectionHasVisible;
+					});
+
+					const emptyEl = container.querySelector(".bookmarks-empty");
+					if (emptyEl) {
+						emptyEl.classList.toggle("hidden", hasVisible);
+						emptyEl.classList.toggle("flex", !hasVisible);
+					}
+				}
+			}
+			customElements.define("bookmark-filter", BookmarkFilter);
+		}
+	</script>
+
+	<script is:inline define:vars={{ runtimeBookmarksUrl, fallbackBookmarkIconUrl, allFilterText, bookmarksEmptyText }}>
+		(function initRuntimeBookmarks() {
+			if (window.__fireflyRuntimeBookmarksBound) {
+				if (typeof window.__fireflyLoadRuntimeBookmarks === "function") {
+					window.__fireflyLoadRuntimeBookmarks();
+				}
+				return;
+			}
+			window.__fireflyRuntimeBookmarksBound = true;
+
+			function normalizeText(value) {
+				return typeof value === "string" ? value.trim() : "";
+			}
+
+			function escapeHtml(value) {
+				return normalizeText(value)
+					.replace(/&/g, "&amp;")
+					.replace(/</g, "&lt;")
+					.replace(/>/g, "&gt;")
+					.replace(/"/g, "&quot;")
+					.replace(/'/g, "&#39;");
+			}
+
+			function escapeAttribute(value) {
+				return escapeHtml(value).replace(/`/g, "&#96;");
+			}
+
+			function getEndpoints(endpoint) {
+				if (/^https?:\/\//i.test(endpoint)) return [endpoint];
+				const hostname = window.location.hostname;
+				if (hostname === "localhost" || hostname === "127.0.0.1") {
+					const localBackendEndpoint = "http://localhost:8090/api/user/bookmarks";
+					return localBackendEndpoint === endpoint
+						? [endpoint]
+						: [localBackendEndpoint, endpoint];
+				}
+				return [endpoint];
+			}
+
+			function toHttpUrl(value, baseUrl) {
+				const text = normalizeText(value);
+				if (!text) return "";
+				try {
+					const parsed = new URL(text, baseUrl || window.location.href);
+					return parsed.protocol === "http:" || parsed.protocol === "https:"
+						? parsed.href
+						: "";
+				} catch (_) {
+					return "";
+				}
+			}
+
+			function toImageUrl(value, baseUrl) {
+				return toHttpUrl(value, baseUrl) || fallbackBookmarkIconUrl;
+			}
+
+			function normalizeBookmark(bookmark, endpoint) {
+				const title = normalizeText(bookmark?.name || bookmark?.title);
+				const siteurl = toHttpUrl(
+					bookmark?.linkUrl || bookmark?.siteurl || bookmark?.url,
+					endpoint,
+				);
+				if (!title || !siteurl) return null;
+				return {
+					title,
+					desc: normalizeText(bookmark?.summary || bookmark?.desc || bookmark?.description),
+					imgurl: toImageUrl(
+						bookmark?.iconImage || bookmark?.imgurl || bookmark?.logoImage,
+						endpoint,
+					),
+					siteurl,
+					targetBlank: bookmark?.openInNewWindow !== 0,
+					tags: Array.isArray(bookmark?.tags)
+						? bookmark.tags.map((tag) => normalizeText(tag)).filter(Boolean)
+						: [],
+				};
+			}
+
+			function normalizeGroup(group, endpoint) {
+				const title = normalizeText(group?.categoryName || group?.name || group?.title);
+				if (!title) return null;
+				const slug = normalizeText(group?.categorySlug || group?.slug) || title;
+				const rawBookmarks = Array.isArray(group?.bookmarks)
+					? group.bookmarks
+					: Array.isArray(group?.items)
+						? group.items
+						: [];
+				const bookmarks = rawBookmarks
+					.map((bookmark) => normalizeBookmark(bookmark, endpoint))
+					.filter(Boolean);
+				if (!bookmarks.length) return null;
+				return { title, slug, bookmarks };
+			}
+
+			async function fetchBookmarks() {
+				for (const endpoint of getEndpoints(runtimeBookmarksUrl)) {
+					try {
+						const response = await fetch(endpoint, {
+							headers: { Accept: "application/json" },
+							cache: "no-store",
+						});
+						if (!response.ok) continue;
+						const payload = await response.json();
+						if (payload?.code !== 200 || !Array.isArray(payload.data)) continue;
+						return payload.data
+							.map((group) => normalizeGroup(group, endpoint))
+							.filter(Boolean);
+					} catch (error) {
+						console.warn("收藏夹运行时加载失败。", error);
+					}
+				}
+				return null;
+			}
+
+			function getBookmarkSignature(group) {
+				return encodeURIComponent(
+					JSON.stringify([
+						group.title,
+						group.slug,
+						group.bookmarks.map((bookmark) => [
+							bookmark.title,
+							bookmark.desc,
+							bookmark.imgurl,
+							bookmark.siteurl,
+							bookmark.targetBlank,
+							bookmark.tags || [],
+						]),
+					]),
+				);
+			}
+
+			function renderCategoryFilters(groups) {
+				const filter = document.querySelector("[data-bookmark-filter]");
+				const categoryList = document.querySelector("[data-bookmark-category-list]");
+				if (!filter || !categoryList) return;
+
+				filter.hidden = false;
+				filter.classList.remove("hidden");
+				filter.selectedCategory = "all";
+				const input = filter.querySelector("[data-search]");
+				if (input) input.value = "";
+				categoryList.innerHTML = [
+					`<button data-category="all" class="category-pill px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-200" data-active>${escapeHtml(allFilterText)}</button>`,
+					...groups.map(
+						(group) =>
+							`<button data-category="${escapeAttribute(group.slug)}" class="category-pill px-3 py-1.5 rounded-full text-sm font-medium transition-colors duration-200">${escapeHtml(group.title)}</button>`,
+					),
+				].join("");
+			}
+
+			function renderEmptyState(container) {
+				container.innerHTML = `<div class="flex flex-col items-center justify-center py-12 text-neutral-400 dark:text-neutral-500"><div class="text-sm">${escapeHtml(bookmarksEmptyText)}</div></div>`;
+				const filter = document.querySelector("[data-bookmark-filter]");
+				if (filter) filter.hidden = true;
+				const searchEmpty = document.querySelector(".bookmarks-empty");
+				if (searchEmpty) {
+					searchEmpty.classList.add("hidden");
+					searchEmpty.classList.remove("flex");
+				}
+			}
+
+			function createBookmarkCard(bookmark, group) {
+				const tagsHtml = [group.title, ...(bookmark.tags || [])]
+					.slice(0, 3)
+					.map(
+						(tag) =>
+							`<span class="text-[0.65rem] px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors duration-300">${escapeHtml(tag)}</span>`,
+					)
+					.join("");
+				const targetAttrs = bookmark.targetBlank
+					? ' target="_blank" rel="noopener noreferrer"'
+					: "";
+
+				return `<a href="${escapeAttribute(bookmark.siteurl)}"${targetAttrs} data-category="${escapeAttribute(group.slug)}" data-tags="${escapeAttribute([group.title, ...(bookmark.tags || [])].join(","))}" class="bookmark-card group flex items-center gap-3 p-2.5 rounded-xl border border-(--line-divider) hover:border-(--primary) hover:bg-(--card-bg) transition-all duration-300 hover:shadow-lg relative overflow-hidden"><div class="absolute inset-0 bg-(--primary) opacity-0 group-hover:opacity-5 transition-opacity duration-300 pointer-events-none"></div><div class="relative w-16 h-16 shrink-0 rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 border border-black/5 dark:border-white/5 group-hover:scale-105 transition-transform duration-300"><img src="${escapeAttribute(bookmark.imgurl)}" alt="${escapeAttribute(bookmark.title)}" class="w-full h-full object-cover" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${escapeAttribute(fallbackBookmarkIconUrl)}';"></div><div class="grow min-w-0 flex flex-col justify-center gap-0.5"><div class="flex items-center justify-between"><div class="font-bold text-base text-neutral-900 dark:text-neutral-100 group-hover:text-(--primary) transition-colors truncate pr-4">${escapeHtml(bookmark.title)}</div><span class="text-(--primary) text-lg opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300" aria-hidden="true">&nearr;</span></div><div class="text-sm text-neutral-500 dark:text-neutral-400 line-clamp-1" title="${escapeAttribute(bookmark.desc)}">${escapeHtml(bookmark.desc)}</div><div class="flex flex-wrap gap-1 mt-1">${tagsHtml}</div></div></a>`;
+			}
+
+			function createBookmarkGroup(group) {
+				return `<section class="bookmark-category-section" data-category="${escapeAttribute(group.slug)}"><div class="flex items-center justify-between gap-3 mb-3"><div class="flex items-center gap-2 min-w-0"><span class="w-2 h-2 rounded-full bg-(--primary) shrink-0" aria-hidden="true"></span><h2 class="font-bold text-lg text-neutral-900 dark:text-neutral-100 truncate">${escapeHtml(group.title)}</h2></div><span class="shrink-0 text-xs px-2 py-1 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">${group.bookmarks.length} 个收藏</span></div><div class="bookmarks-grid">${group.bookmarks.map((bookmark) => createBookmarkCard(bookmark, group)).join("")}</div></section>`;
+			}
+
+			function renderBookmarks(groups) {
+				const container = document.querySelector("[data-bookmark-groups]");
+				if (!container) return;
+
+				if (!groups.length) {
+					container.dataset.renderedBookmarkSignature = "";
+					renderEmptyState(container);
+					return;
+				}
+
+				const signature = groups.map(getBookmarkSignature).join("|");
+				if (signature && signature === container.dataset.renderedBookmarkSignature) return;
+
+				renderCategoryFilters(groups);
+				container.innerHTML = groups.map(createBookmarkGroup).join("");
+				container.dataset.renderedBookmarkSignature = signature;
+
+				const searchEmpty = document.querySelector(".bookmarks-empty");
+				if (searchEmpty) {
+					searchEmpty.classList.add("hidden");
+					searchEmpty.classList.remove("flex");
+				}
+			}
+
+			async function loadBookmarks() {
+				const groups = await fetchBookmarks();
+				if (!groups) return;
+				renderBookmarks(groups);
+			}
+
+			window.__fireflyLoadRuntimeBookmarks = loadBookmarks;
+
+			if (document.readyState === "loading") {
+				document.addEventListener("DOMContentLoaded", loadBookmarks, { once: true });
+			} else {
+				loadBookmarks();
+			}
+			document.addEventListener("astro:page-load", loadBookmarks);
+			document.addEventListener("swup:contentReplaced", loadBookmarks);
+		})();
+	</script>
+
+	<style is:global>
+		.bookmarks-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+			gap: 0.75rem;
+		}
+
+		.bookmark-category-section[hidden] {
+			display: none;
+		}
+	</style>
+</MainGridLayout>

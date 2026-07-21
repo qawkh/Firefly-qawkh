@@ -96,6 +96,8 @@ export const siteConfig: SiteConfig = {
 	pages: {
 		// 友链页面开关
 		friends: true,
+		// 收藏夹页面开关
+		bookmarks: true,
 		// 打赏页面开关
 		sponsor: true,
 		// 留言板页面开关，需要配置评论系统
@@ -209,7 +211,7 @@ export const siteConfig: SiteConfig = {
 		// Bilibili 配置
 		bilibili: {
 			// 你的 Bilibili 用户 UID
-			uid: "38932988",
+			uid: "350302206",
 		},
 		// TMDB 配置（可选，需要翻墙）
 		// tmdb: {

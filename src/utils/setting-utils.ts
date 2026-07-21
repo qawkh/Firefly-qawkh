@@ -26,6 +26,39 @@ declare global {
 	}
 }
 
+const WALLPAPER_MODE_STORAGE_KEY = "wallpaperMode";
+const WALLPAPER_DEFAULT_MODE_STORAGE_KEY = "firefly-wallpaper-default-mode";
+
+function isValidWallpaperMode(value: string | null): value is WALLPAPER_MODE {
+	return (
+		value === WALLPAPER_BANNER ||
+		value === WALLPAPER_FULLSCREEN ||
+		value === WALLPAPER_OVERLAY ||
+		value === WALLPAPER_NONE
+	);
+}
+
+function syncStoredWallpaperDefaultMode(): void {
+	if (
+		typeof localStorage === "undefined" ||
+		typeof localStorage.getItem !== "function" ||
+		typeof localStorage.setItem !== "function"
+	) {
+		return;
+	}
+
+	if (
+		localStorage.getItem(WALLPAPER_DEFAULT_MODE_STORAGE_KEY) !==
+		backgroundWallpaper.mode
+	) {
+		localStorage.removeItem(WALLPAPER_MODE_STORAGE_KEY);
+		localStorage.setItem(
+			WALLPAPER_DEFAULT_MODE_STORAGE_KEY,
+			backgroundWallpaper.mode,
+		);
+	}
+}
+
 export function getDefaultHue(): number {
 	const fallback = "250";
 	// 检查是否在浏览器环境中
@@ -847,7 +880,8 @@ export function setWallpaperMode(mode: WALLPAPER_MODE): void {
 	) {
 		return;
 	}
-	localStorage.setItem("wallpaperMode", mode);
+	syncStoredWallpaperDefaultMode();
+	localStorage.setItem(WALLPAPER_MODE_STORAGE_KEY, mode);
 	applyWallpaperModeToDocument(mode);
 	if (typeof window !== "undefined") {
 		window.dispatchEvent(
@@ -876,14 +910,18 @@ export function getStoredWallpaperMode(): WALLPAPER_MODE {
 
 	const isSwitchable = backgroundWallpaper.switchable ?? true;
 	if (!isSwitchable) {
-		localStorage.removeItem("wallpaperMode");
+		localStorage.removeItem(WALLPAPER_MODE_STORAGE_KEY);
+		localStorage.removeItem(WALLPAPER_DEFAULT_MODE_STORAGE_KEY);
 		return backgroundWallpaper.mode;
 	}
 
-	return (
-		(localStorage.getItem("wallpaperMode") as WALLPAPER_MODE) ||
-		backgroundWallpaper.mode
-	);
+	syncStoredWallpaperDefaultMode();
+	const storedMode = localStorage.getItem(WALLPAPER_MODE_STORAGE_KEY);
+	if (isValidWallpaperMode(storedMode)) {
+		return storedMode;
+	}
+	localStorage.removeItem(WALLPAPER_MODE_STORAGE_KEY);
+	return backgroundWallpaper.mode;
 }
 
 // Overlay settings functions

@@ -428,14 +428,29 @@ const siteLang = lang.replace("_", "-");
         }
       });
 
-      // 初始化壁纸模式 - 在页面渲染前应用
-      const WALLPAPER_BANNER = "banner";
-      const WALLPAPER_FULLSCREEN = "fullscreen";
-      const WALLPAPER_OVERLAY = "overlay";
-      const WALLPAPER_NONE = "none";
-      const wallpaperMode = isWallpaperSwitchable
-        ? localStorage.getItem("wallpaperMode") || defaultWallpaperMode
-        : defaultWallpaperMode;
+			// 初始化壁纸模式 - 在页面渲染前应用
+			const WALLPAPER_BANNER = "banner";
+			const WALLPAPER_FULLSCREEN = "fullscreen";
+			const WALLPAPER_OVERLAY = "overlay";
+			const WALLPAPER_NONE = "none";
+			const WALLPAPER_MODE_STORAGE_KEY = "wallpaperMode";
+			const WALLPAPER_DEFAULT_MODE_STORAGE_KEY = "firefly-wallpaper-default-mode";
+			let storedWallpaperMode = null;
+
+			if (isWallpaperSwitchable) {
+				try {
+					if (localStorage.getItem(WALLPAPER_DEFAULT_MODE_STORAGE_KEY) !== defaultWallpaperMode) {
+						localStorage.removeItem(WALLPAPER_MODE_STORAGE_KEY);
+						localStorage.setItem(WALLPAPER_DEFAULT_MODE_STORAGE_KEY, defaultWallpaperMode);
+					}
+					storedWallpaperMode = localStorage.getItem(WALLPAPER_MODE_STORAGE_KEY);
+				} catch (_) {
+					storedWallpaperMode = null;
+				}
+			}
+			const wallpaperMode = isWallpaperSwitchable
+				? storedWallpaperMode || defaultWallpaperMode
+				: defaultWallpaperMode;
 
       // 设置data-wallpaper-mode属性
       document.documentElement.setAttribute(

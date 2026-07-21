@@ -1,6 +1,11 @@
 export type { AnalyticsConfig } from "./analyticsConfig";
 export type { AnnouncementConfig } from "./announcementConfig";
 export type { BackgroundWallpaperConfig } from "./backgroundWallpaper";
+export type {
+	BookmarkGroup,
+	BookmarkLink,
+	BookmarksPageConfig,
+} from "./bookmarksConfig";
 export type { CommentConfig } from "./commentConfig";
 export type { CoverImageConfig } from "./coverImageConfig";
 export type { DynamicConfig } from "./dynamicConfig";

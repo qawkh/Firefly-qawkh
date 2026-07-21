@@ -59,6 +59,9 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 			// 相册
 			LinkPresets.Gallery,
 
+			// 收藏夹
+			LinkPresets.Bookmarks,
+
 			// 追番
 			LinkPresets.Anime,
 
@@ -73,9 +76,6 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 		url: "#",
 		icon: "material-symbols:info",
 		children: [
-			// 打赏
-			LinkPresets.Sponsor,
-
 			// 关于页面
 			LinkPresets.About,
 		],
@@ -90,15 +90,9 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 		children: [
 			{
 				name: "GitHub",
-				url: "https://github.com/CuteLeaf/Firefly",
+				url: "https://github.com/qawkh/Firefly-qawkh",
 				external: true,
 				icon: "fa7-brands:github",
-			},
-			{
-				name: "Gitee",
-				url: "https://gitee.com/CuteLeaf/Firefly",
-				external: true,
-				icon: "fa7-brands:gitee",
 			},
 			{
 				name: "QQ交流群",
@@ -167,6 +161,12 @@ export const LinkPresets: Record<string, NavBarLink> = {
 		url: "/friends/",
 		icon: "material-symbols:link-2-rounded",
 		pageKey: "friends",
+	},
+	Bookmarks: {
+		name: "收藏夹",
+		url: "/bookmarks/",
+		icon: "material-symbols:bookmarks-rounded",
+		pageKey: "bookmarks",
 	},
 	Sponsor: {
 		name: "打赏",
